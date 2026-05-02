@@ -1,3 +1,4 @@
 requests
 numpy
 gymnasium
+stable-baselines3

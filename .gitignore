@@ -14,3 +14,6 @@ __pycache__/
 venv/
 generated_src/
 /send_action_test.py
+runs/
+logs/
+*.zip

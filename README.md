@@ -34,6 +34,7 @@ src/artisynth/models/tmj/practice/
 python/
   tmj_practice_env.py
   run_env_smoke_test.py
+  train_baseline.py
   send_action_test.py
   requirements.txt
 ```
@@ -104,6 +105,9 @@ step(action):
 
 `python/run_env_smoke_test.py` runs the environment wrapper without training.
 
+`python/train_baseline.py` trains a short Stable-Baselines3 PPO baseline on
+`TmjPracticeEnv`.
+
 ## How To Run
 
 1. Open the Java files in the Eclipse/ArtiSynth project.
@@ -138,6 +142,15 @@ python python/send_action_test.py
 python python/run_env_smoke_test.py
 ```
 
+8. Run a short PPO baseline:
+
+```bash
+python python/train_baseline.py --timesteps 512 --skip-check-env
+```
+
+The trained model is saved under `runs/` by default. This directory is ignored
+by git.
+
 Expected evidence of success:
 
 - `targetPosition` remains fixed at x = 0.2
@@ -159,8 +172,10 @@ Implemented:
 - Python client test
 - Gym-style Python environment wrapper
 - step/action/reward/termination smoke test
+- Stable-Baselines3 PPO baseline script
 
 Next steps:
 
-- connect an RL baseline
+- make the task less trivial by randomizing targets and initial states
+- tune reward terms for tracking and effort
 - extend from the simple muscle prototype toward a TMJ/jaw model

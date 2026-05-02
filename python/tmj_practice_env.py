@@ -29,15 +29,21 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         self,
         base_url: str = "http://localhost:8081",
         wait_action: float = 0.05,
+        reset_wait: float = 0.05,
         goal_threshold: float = 0.01,
         max_episode_steps: int = 100,
         goal_reward: float = 5.0,
+        use_simulation_time: bool = True,
+        simulation_time_timeout: float = 5.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.wait_action = wait_action
+        self.reset_wait = reset_wait
         self.goal_threshold = goal_threshold
         self.max_episode_steps = max_episode_steps
         self.goal_reward = goal_reward
+        self.use_simulation_time = use_simulation_time
+        self.simulation_time_timeout = simulation_time_timeout
 
         self.elapsed_steps = 0
         self.prev_distance: Optional[float] = None
@@ -68,7 +74,9 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         if gym is not None:
             super().reset(seed=seed)
 
-        state = self._post("reset")
+        self._post("reset")
+        self._wait(self.reset_wait)
+        state = self._get("state")
         self.elapsed_steps = 0
         self.prev_distance = float(state["trackingError"])
 
@@ -90,9 +98,9 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         action_array = np.clip(action_array, 0.0, 1.0)
         self._post("excitations", {"excitations": action_array.tolist()})
 
-        # This matches Amir's high-level pattern: action is sent, ArtiSynth is
-        # allowed to simulate briefly, then Python reads the next state.
-        time.sleep(self.wait_action)
+        # This matches Amir's high-level pattern: action is sent, ArtiSynth
+        # simulation time advances, then Python reads the next state.
+        self._wait(self.wait_action)
 
         state = self._get("state")
         self.elapsed_steps += 1
@@ -127,6 +135,25 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
             return 1.0 / max(self.elapsed_steps, 1), False
 
         return -1.0, False
+
+    def _wait(self, duration: float) -> None:
+        if duration <= 0.0:
+            return
+
+        if not self.use_simulation_time:
+            time.sleep(duration)
+            return
+
+        start_time = float(self._get("time"))
+        wall_deadline = time.time() + self.simulation_time_timeout
+
+        while float(self._get("time")) - start_time < duration:
+            if time.time() > wall_deadline:
+                raise TimeoutError(
+                    "ArtiSynth simulation time did not advance. "
+                    "Make sure the model is playing."
+                )
+            time.sleep(0.002)
 
     def _state_to_observation(self, state: Dict[str, Any]) -> np.ndarray:
         values = []
