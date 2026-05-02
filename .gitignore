@@ -1,0 +1,16 @@
+.DS_Store
+*.class
+bin/
+target/
+build/
+out/
+.classpath
+.project
+.settings/
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/
+generated_src/
+/send_action_test.py
