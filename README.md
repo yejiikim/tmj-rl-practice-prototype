@@ -32,6 +32,8 @@ src/artisynth/models/tmj/practice/
   SimpleRlController.java
 
 python/
+  tmj_practice_env.py
+  run_env_smoke_test.py
   send_action_test.py
   requirements.txt
 ```
@@ -88,6 +90,20 @@ It also reports:
 3. sends sinusoidal excitation actions to `/excitations`,
 4. prints marker position, target position, tracking error, reward, and force.
 
+`python/tmj_practice_env.py` is the Gym-style environment wrapper. It follows
+the same high-level control loop as Amir's point-to-point environment:
+
+```text
+reset()
+step(action):
+  send excitation action
+  wait briefly while ArtiSynth simulates
+  read state
+  compute reward/done from target distance
+```
+
+`python/run_env_smoke_test.py` runs the environment wrapper without training.
+
 ## How To Run
 
 1. Open the Java files in the Eclipse/ArtiSynth project.
@@ -116,6 +132,12 @@ curl -X POST http://localhost:8081/reset
 python python/send_action_test.py
 ```
 
+7. Run the Gym-style environment smoke test:
+
+```bash
+python python/run_env_smoke_test.py
+```
+
 Expected evidence of success:
 
 - `targetPosition` remains fixed at x = 0.2
@@ -135,10 +157,10 @@ Implemented:
 - reward-like value
 - reset endpoint
 - Python client test
+- Gym-style Python environment wrapper
+- step/action/reward/termination smoke test
 
 Next steps:
 
-- convert the Python client into a Gym-style environment class
-- implement `step(action)` and episode termination
 - connect an RL baseline
 - extend from the simple muscle prototype toward a TMJ/jaw model

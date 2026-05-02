@@ -63,11 +63,29 @@ public class SimpleRlController extends ControllerBase {
       return 1;
    }
 
+   public int getStateSize() {
+      return getState().length;
+   }
+
+   public int getObservationSize() {
+      return getObservation().length;
+   }
+
    public void apply (double t0, double t1) {
       exciter.setExcitation (getActionExcitation());
    }
 
    public double[] getState() {
+      double[] observation = getObservation();
+      double[] state = new double[observation.length + 1];
+      for (int i = 0; i < observation.length; i++) {
+         state[i] = observation[i];
+      }
+      state[observation.length] = getRewardLikeValue();
+      return state;
+   }
+
+   public double[] getObservation() {
       Point3d pos = marker.getPosition();
       Point3d targetPos = target.getPosition();
       Vector3d vel = marker.getVelocity();
@@ -80,8 +98,8 @@ public class SimpleRlController extends ControllerBase {
          error,
          getActionExcitation(),
          exciter.getExcitation(),
+         muscle.getExcitation(),
          muscle.getForceNorm(),
-         getRewardLikeValue()
       };
    }
 

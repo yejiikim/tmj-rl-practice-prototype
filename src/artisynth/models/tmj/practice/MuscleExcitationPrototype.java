@@ -8,6 +8,7 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,6 +17,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 
 import artisynth.core.gui.ControlPanel;
+import artisynth.core.driver.Main;
 import artisynth.core.materials.SimpleAxialMuscle;
 import artisynth.core.mechmodels.FrameMarker;
 import artisynth.core.mechmodels.MechModel;
@@ -135,8 +137,11 @@ public class MuscleExcitationPrototype extends RootModel {
       restServer = HttpServer.create (new InetSocketAddress (restPort), 0);
       restServer.createContext ("/", new RootHandler());
       restServer.createContext ("/actionSize", new ActionSizeHandler());
+      restServer.createContext ("/stateSize", new StateSizeHandler());
+      restServer.createContext ("/obsSize", new ObsSizeHandler());
       restServer.createContext ("/excitations", new ExcitationsHandler());
       restServer.createContext ("/state", new StateHandler());
+      restServer.createContext ("/time", new TimeHandler());
       restServer.createContext ("/reset", new ResetHandler());
       restServer.setExecutor (null);
       restServer.start();
@@ -162,9 +167,33 @@ public class MuscleExcitationPrototype extends RootModel {
       }
    }
 
+   private class StateSizeHandler implements HttpHandler {
+      public void handle (HttpExchange exchange) throws IOException {
+         sendText (
+            exchange, 200,
+            Integer.toString (rlController.getStateSize()));
+      }
+   }
+
+   private class ObsSizeHandler implements HttpHandler {
+      public void handle (HttpExchange exchange) throws IOException {
+         sendText (
+            exchange, 200,
+            Integer.toString (rlController.getObservationSize()));
+      }
+   }
+
    private class StateHandler implements HttpHandler {
       public void handle (HttpExchange exchange) throws IOException {
          sendText (exchange, 200, rlController.getStateJson());
+      }
+   }
+
+   private class TimeHandler implements HttpHandler {
+      public void handle (HttpExchange exchange) throws IOException {
+         sendText (
+            exchange, 200,
+            String.format (Locale.US, "%.6f", Main.getMain().getTime()));
       }
    }
 
