@@ -23,6 +23,9 @@ def make_env(args):
         goal_threshold=args.goal_threshold,
         max_episode_steps=args.max_episode_steps,
         goal_reward=args.goal_reward,
+        progress_reward_scale=args.progress_reward_scale,
+        distance_penalty_scale=args.distance_penalty_scale,
+        effort_penalty_scale=args.effort_penalty_scale,
         use_simulation_time=not args.wall_clock_wait,
     )
     return Monitor(env)
@@ -39,6 +42,9 @@ def main():
     parser.add_argument("--max-episode-steps", type=int, default=40)
     parser.add_argument("--goal-threshold", type=float, default=0.01)
     parser.add_argument("--goal-reward", type=float, default=5.0)
+    parser.add_argument("--progress-reward-scale", type=float, default=20.0)
+    parser.add_argument("--distance-penalty-scale", type=float, default=1.0)
+    parser.add_argument("--effort-penalty-scale", type=float, default=0.01)
     parser.add_argument("--save-path", default="runs/ppo_tmj_practice")
     parser.add_argument(
         "--wall-clock-wait",
@@ -106,7 +112,7 @@ def main():
             "marker x =", round(info["markerPosition"][0], 4),
             "target x =", round(info["targetPosition"][0], 4),
             "error =", round(info["trackingError"], 4),
-            "force =", round(info["muscleForce"], 4),
+            "forces =", [round(float(x), 4) for x in info["muscleForces"]],
         )
         if terminated or truncated:
             break

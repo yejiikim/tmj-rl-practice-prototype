@@ -17,7 +17,8 @@ public class SimpleRlController extends ControllerBase {
       new PropertyList (SimpleRlController.class, ControllerBase.class);
 
    static {
-      myProps.add ("actionExcitation", "external action value", 0.0);
+      myProps.add ("leftActionExcitation", "left muscle action value", 0.0);
+      myProps.add ("rightActionExcitation", "right muscle action value", 0.0);
    }
 
    public PropertyList getAllPropertyInfo() {
@@ -26,41 +27,60 @@ public class SimpleRlController extends ControllerBase {
 
    private FrameMarker marker;
    private Point target;
-   private Muscle muscle;
-   private MuscleExciter exciter;
+   private Muscle leftMuscle;
+   private Muscle rightMuscle;
+   private MuscleExciter leftExciter;
+   private MuscleExciter rightExciter;
 
-   private double actionExcitation = 0.0;
+   private double leftActionExcitation = 0.0;
+   private double rightActionExcitation = 0.0;
 
    public SimpleRlController (
-      FrameMarker marker, Point target, Muscle muscle, MuscleExciter exciter) {
+      FrameMarker marker,
+      Point target,
+      Muscle leftMuscle,
+      Muscle rightMuscle,
+      MuscleExciter leftExciter,
+      MuscleExciter rightExciter) {
 
       this.marker = marker;
       this.target = target;
-      this.muscle = muscle;
-      this.exciter = exciter;
+      this.leftMuscle = leftMuscle;
+      this.rightMuscle = rightMuscle;
+      this.leftExciter = leftExciter;
+      this.rightExciter = rightExciter;
    }
 
-   public synchronized double getActionExcitation() {
-      return actionExcitation;
+   public synchronized double getLeftActionExcitation() {
+      return leftActionExcitation;
    }
 
-   public synchronized void setActionExcitation (double value) {
-      actionExcitation = clamp01 (value);
+   public synchronized void setLeftActionExcitation (double value) {
+      leftActionExcitation = clamp01 (value);
+   }
+
+   public synchronized double getRightActionExcitation() {
+      return rightActionExcitation;
+   }
+
+   public synchronized void setRightActionExcitation (double value) {
+      rightActionExcitation = clamp01 (value);
    }
 
    public synchronized void setExcitations (double[] actions) {
-      if (actions == null || actions.length < 1) {
-         throw new IllegalArgumentException ("Expected one excitation value");
+      if (actions == null || actions.length < 2) {
+         throw new IllegalArgumentException ("Expected two excitation values");
       }
-      actionExcitation = clamp01 (actions[0]);
+      leftActionExcitation = clamp01 (actions[0]);
+      rightActionExcitation = clamp01 (actions[1]);
    }
 
    public synchronized double[] getExcitations() {
-      return new double[] { actionExcitation };
+      return new double[] { leftActionExcitation, rightActionExcitation };
    }
 
    public int getActionSize() {
-      return 1;
+      return 2;
    }
 
    public int getStateSize() {
@@ -72,7 +92,9 @@ public class SimpleRlController extends ControllerBase {
    }
 
    public void apply (double t0, double t1) {
-      exciter.setExcitation (getActionExcitation());
+      double[] actions = getExcitations();
+      leftExciter.setExcitation (actions[0]);
+      rightExciter.setExcitation (actions[1]);
    }
 
    public double[] getState() {
@@ -90,21 +112,23 @@ public class SimpleRlController extends ControllerBase {
       Point3d targetPos = target.getPosition();
       Vector3d vel = marker.getVelocity();
       double error = getTrackingError();
+      double[] actions = getExcitations();
 
       return new double[] {
          pos.x, pos.y, pos.z,
          vel.x, vel.y, vel.z,
          targetPos.x, targetPos.y, targetPos.z,
          error,
-         getActionExcitation(),
-         exciter.getExcitation(),
-         muscle.getExcitation(),
-         muscle.getForceNorm(),
+         actions[0], actions[1],
+         leftExciter.getExcitation(), rightExciter.getExcitation(),
+         leftMuscle.getExcitation(), rightMuscle.getExcitation(),
+         leftMuscle.getForceNorm(), rightMuscle.getForceNorm(),
       };
    }
 
    public String getExcitationsJson() {
-      return String.format (Locale.US, "[%.6f]", getActionExcitation());
+      double[] actions = getExcitations();
+      return String.format (Locale.US, "[%.6f,%.6f]", actions[0], actions[1]);
    }
 
    public String getStateJson() {
@@ -112,6 +136,7 @@ public class SimpleRlController extends ControllerBase {
       Point3d targetPos = target.getPosition();
       Vector3d vel = marker.getVelocity();
       double error = getTrackingError();
+      double[] actions = getExcitations();
 
       return String.format (
          Locale.US,
@@ -120,20 +145,20 @@ public class SimpleRlController extends ControllerBase {
          + "\"markerVelocity\":[%.6f,%.6f,%.6f],"
          + "\"targetPosition\":[%.6f,%.6f,%.6f],"
          + "\"trackingError\":%.6f,"
-         + "\"actionExcitation\":%.6f,"
-         + "\"exciterExcitation\":%.6f,"
-         + "\"muscleExcitation\":%.6f,"
-         + "\"muscleForce\":%.6f,"
+         + "\"actionExcitations\":[%.6f,%.6f],"
+         + "\"exciterExcitations\":[%.6f,%.6f],"
+         + "\"muscleExcitations\":[%.6f,%.6f],"
+         + "\"muscleForces\":[%.6f,%.6f],"
          + "\"rewardLike\":%.6f"
          + "}",
          pos.x, pos.y, pos.z,
          vel.x, vel.y, vel.z,
          targetPos.x, targetPos.y, targetPos.z,
          error,
-         getActionExcitation(),
-         exciter.getExcitation(),
-         muscle.getExcitation(),
-         muscle.getForceNorm(),
+         actions[0], actions[1],
+         leftExciter.getExcitation(), rightExciter.getExcitation(),
+         leftMuscle.getExcitation(), rightMuscle.getExcitation(),
+         leftMuscle.getForceNorm(), rightMuscle.getForceNorm(),
          getRewardLikeValue());
    }
 
@@ -148,8 +173,11 @@ public class SimpleRlController extends ControllerBase {
 
    public double getRewardLikeValue() {
       double error = getTrackingError();
-      double effort = getActionExcitation();
-      return -error * error - 0.01 * effort * effort;
+      double effort =
+         leftActionExcitation * leftActionExcitation
+         + rightActionExcitation * rightActionExcitation;
+      double coactivation = leftActionExcitation * rightActionExcitation;
+      return -error * error - 0.01 * effort - 0.02 * coactivation;
    }
 
    private double clamp01 (double value) {

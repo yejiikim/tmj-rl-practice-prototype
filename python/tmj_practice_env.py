@@ -33,6 +33,9 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         goal_threshold: float = 0.01,
         max_episode_steps: int = 100,
         goal_reward: float = 5.0,
+        progress_reward_scale: float = 20.0,
+        distance_penalty_scale: float = 1.0,
+        effort_penalty_scale: float = 0.01,
         use_simulation_time: bool = True,
         simulation_time_timeout: float = 5.0,
     ):
@@ -42,6 +45,9 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         self.goal_threshold = goal_threshold
         self.max_episode_steps = max_episode_steps
         self.goal_reward = goal_reward
+        self.progress_reward_scale = progress_reward_scale
+        self.distance_penalty_scale = distance_penalty_scale
+        self.effort_penalty_scale = effort_penalty_scale
         self.use_simulation_time = use_simulation_time
         self.simulation_time_timeout = simulation_time_timeout
 
@@ -106,7 +112,7 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         self.elapsed_steps += 1
 
         distance = float(state["trackingError"])
-        reward, terminated = self._calculate_reward(distance)
+        reward, terminated = self._calculate_reward(distance, action_array)
         truncated = self.elapsed_steps >= self.max_episode_steps
 
         observation = self._state_to_observation(state)
@@ -124,17 +130,25 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         except requests.RequestException:
             return False
 
-    def _calculate_reward(self, distance: float) -> Tuple[float, bool]:
+    def _calculate_reward(
+        self,
+        distance: float,
+        action: np.ndarray,
+    ) -> Tuple[float, bool]:
         if distance <= self.goal_threshold:
             return self.goal_reward, True
 
         if self.prev_distance is None:
             return 0.0, False
 
-        if self.prev_distance - distance > 0.0:
-            return 1.0 / max(self.elapsed_steps, 1), False
-
-        return -1.0, False
+        progress = self.prev_distance - distance
+        effort = float(np.sum(np.square(action)))
+        reward = (
+            self.progress_reward_scale * progress
+            - self.distance_penalty_scale * distance
+            - self.effort_penalty_scale * effort
+        )
+        return float(reward), False
 
     def _wait(self, duration: float) -> None:
         if duration <= 0.0:
@@ -156,30 +170,63 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
             time.sleep(0.002)
 
     def _state_to_observation(self, state: Dict[str, Any]) -> np.ndarray:
+        action_excitations = self._array_value(
+            state, "actionExcitations", "actionExcitation"
+        )
+        exciter_excitations = self._array_value(
+            state, "exciterExcitations", "exciterExcitation"
+        )
+        muscle_excitations = self._array_value(
+            state, "muscleExcitations", "muscleExcitation"
+        )
+        muscle_forces = self._array_value(state, "muscleForces", "muscleForce")
+
         values = []
         values.extend(state["markerPosition"])
         values.extend(state["markerVelocity"])
         values.extend(state["targetPosition"])
         values.append(state["trackingError"])
-        values.append(state["actionExcitation"])
-        values.append(state["exciterExcitation"])
-        values.append(state["muscleExcitation"])
-        values.append(state["muscleForce"])
+        values.extend(action_excitations)
+        values.extend(exciter_excitations)
+        values.extend(muscle_excitations)
+        values.extend(muscle_forces)
         return np.asarray(values, dtype=np.float32)
 
     def _state_to_info(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        action_excitations = self._array_value(
+            state, "actionExcitations", "actionExcitation"
+        )
+        exciter_excitations = self._array_value(
+            state, "exciterExcitations", "exciterExcitation"
+        )
+        muscle_excitations = self._array_value(
+            state, "muscleExcitations", "muscleExcitation"
+        )
+        muscle_forces = self._array_value(state, "muscleForces", "muscleForce")
+
         return {
             "markerPosition": state["markerPosition"],
             "markerVelocity": state["markerVelocity"],
             "targetPosition": state["targetPosition"],
             "trackingError": float(state["trackingError"]),
-            "actionExcitation": float(state["actionExcitation"]),
-            "exciterExcitation": float(state["exciterExcitation"]),
-            "muscleExcitation": float(state["muscleExcitation"]),
-            "muscleForce": float(state["muscleForce"]),
+            "actionExcitations": action_excitations,
+            "exciterExcitations": exciter_excitations,
+            "muscleExcitations": muscle_excitations,
+            "muscleForces": muscle_forces,
+            "muscleForce": float(np.sum(muscle_forces)),
             "rewardLike": float(state["rewardLike"]),
             "elapsedSteps": self.elapsed_steps,
         }
+
+    def _array_value(
+        self,
+        state: Dict[str, Any],
+        array_key: str,
+        scalar_key: str,
+    ) -> np.ndarray:
+        if array_key in state:
+            return np.asarray(state[array_key], dtype=np.float32)
+        return np.asarray([state[scalar_key]], dtype=np.float32)
 
     def _get(self, endpoint: str) -> Any:
         response = requests.get(f"{self.base_url}/{endpoint}", timeout=5.0)
