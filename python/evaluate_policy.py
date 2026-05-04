@@ -9,15 +9,9 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "tmj_rl_matplotlib"),
 )
 
-from stable_baselines3 import PPO, SAC
+from stable_baselines3 import SAC
 
 from tmj_practice_env import TmjPracticeEnv
-
-
-ALGORITHMS = {
-    "ppo": PPO,
-    "sac": SAC,
-}
 
 
 def make_env(args):
@@ -42,9 +36,9 @@ def make_env(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Evaluate a saved policy and write step-level CSV logs."
+        description="Evaluate a saved SAC policy and write step-level CSV logs."
     )
-    parser.add_argument("--algo", choices=sorted(ALGORITHMS), default="sac")
+    parser.add_argument("--algo", choices=["sac"], default="sac", help=argparse.SUPPRESS)
     parser.add_argument("--base-url", default="http://localhost:8081")
     parser.add_argument("--model-path", default=None)
     parser.add_argument("--episodes", type=int, default=3)
@@ -81,14 +75,14 @@ def main():
     args = parser.parse_args()
 
     if args.model_path is None:
-        args.model_path = f"runs/{args.algo}_tmj_practice.zip"
+        args.model_path = "runs/sac_tmj_practice.zip"
 
     output_dir = os.path.dirname(args.output)
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
 
     env = make_env(args)
-    model = ALGORITHMS[args.algo].load(args.model_path)
+    model = SAC.load(args.model_path)
 
     rows = []
     episode_returns = []

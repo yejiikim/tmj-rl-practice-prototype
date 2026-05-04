@@ -7,18 +7,12 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "tmj_rl_matplotlib"),
 )
 
-from stable_baselines3 import PPO, SAC
+from stable_baselines3 import SAC
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 
 from tmj_practice_env import TmjPracticeEnv
-
-
-ALGORITHMS = {
-    "ppo": PPO,
-    "sac": SAC,
-}
 
 
 def make_env(args):
@@ -44,9 +38,9 @@ def make_env(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train an RL baseline on the simple TMJ practice env."
+        description="Train a SAC baseline on the simple TMJ practice env."
     )
-    parser.add_argument("--algo", choices=sorted(ALGORITHMS), default="sac")
+    parser.add_argument("--algo", choices=["sac"], default="sac", help=argparse.SUPPRESS)
     parser.add_argument("--base-url", default="http://localhost:8081")
     parser.add_argument("--timesteps", type=int, default=5000)
     parser.add_argument("--wait-action", type=float, default=0.05)
@@ -87,7 +81,7 @@ def main():
     args = parser.parse_args()
 
     if args.save_path is None:
-        args.save_path = f"runs/{args.algo}_tmj_practice"
+        args.save_path = "runs/sac_tmj_practice"
 
     save_dir = os.path.dirname(args.save_path)
     if save_dir:
@@ -99,34 +93,21 @@ def main():
         print("Checking Stable-Baselines3 environment compatibility...")
         check_env(env.unwrapped, warn=True)
 
-    print(f"Training {args.algo.upper()} baseline...")
-    model_class = ALGORITHMS[args.algo]
-    if args.algo == "ppo":
-        model = model_class(
-            "MlpPolicy",
-            env,
-            verbose=1,
-            n_steps=128,
-            batch_size=64,
-            learning_rate=3e-4,
-            gamma=0.98,
-            device="cpu",
-        )
-    else:
-        model = model_class(
-            "MlpPolicy",
-            env,
-            verbose=1,
-            buffer_size=20000,
-            learning_starts=200,
-            batch_size=64,
-            learning_rate=3e-4,
-            gamma=0.98,
-            tau=0.02,
-            train_freq=1,
-            gradient_steps=1,
-            device="cpu",
-        )
+    print("Training SAC baseline...")
+    model = SAC(
+        "MlpPolicy",
+        env,
+        verbose=1,
+        buffer_size=20000,
+        learning_starts=200,
+        batch_size=64,
+        learning_rate=3e-4,
+        gamma=0.98,
+        tau=0.02,
+        train_freq=1,
+        gradient_steps=1,
+        device="cpu",
+    )
     model.learn(total_timesteps=args.timesteps)
 
     model.save(args.save_path)

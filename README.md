@@ -41,7 +41,7 @@ This prototype demonstrates the full RL communication pipeline:
 - Python sends action values through REST.
 - `SimpleRlController` applies those values to ArtiSynth `MuscleExciter`s.
 - Python reads the updated marker/target state after simulation advances.
-- Stable-Baselines3 PPO or SAC can train against the environment.
+- Stable-Baselines3 SAC can train against the environment.
 
 This is still a practice model, not the final TMJ biomechanics model. It is the
 minimal working version of the ArtiSynth-Python RL interface.
@@ -178,11 +178,11 @@ replaced with a TMJ-specific reward.
 - if the target is left of the marker, activate the left muscle
 - if the target is right of the marker, activate the right muscle
 
-`python/train_baseline.py` trains a Stable-Baselines3 PPO or SAC baseline. By
-default it exposes normalized `[-1, 1]` actions to the RL policy and maps them
+`python/train_baseline.py` trains a Stable-Baselines3 SAC baseline. By default
+it exposes normalized `[-1, 1]` actions to the RL policy and maps them
 internally to ArtiSynth excitation values in `[0, 1]`.
 
-`python/evaluate_policy.py` loads a saved PPO/SAC model and writes step-level CSV
+`python/evaluate_policy.py` loads a saved SAC model and writes step-level CSV
 logs with marker position, target position, tracking error, actions, forces,
 reward, and episode flags.
 
@@ -283,16 +283,10 @@ Run the smoke test:
 python python/run_env_smoke_test.py
 ```
 
-Run SAC training, recommended next baseline:
+Run SAC training:
 
 ```bash
-python python/train_baseline.py --algo sac --timesteps 20000 --skip-check-env
-```
-
-Run PPO training, for comparison with the earlier baseline:
-
-```bash
-python python/train_baseline.py --algo ppo --timesteps 20000 --skip-check-env
+python python/train_baseline.py --timesteps 20000 --skip-check-env
 ```
 
 The trained model is saved under `runs/`, which is ignored by git.
@@ -301,7 +295,6 @@ Evaluate a saved policy and write a CSV log:
 
 ```bash
 python python/evaluate_policy.py \
-  --algo sac \
   --model-path runs/sac_tmj_practice.zip \
   --episodes 20 \
   --output runs/evaluation.csv
@@ -311,7 +304,6 @@ Optional auto-launch pattern:
 
 ```bash
 python python/train_baseline.py \
-  --algo sac \
   --launch-command "artisynth -model artisynth.models.tmj.practice.MuscleExcitationPrototype -play" \
   --timesteps 20000 \
   --skip-check-env
@@ -344,7 +336,7 @@ The current SAC baseline learns a strong policy for this simple antagonist
 tracking task. Latest SAC training command:
 
 ```bash
-python python/train_baseline.py --algo sac --timesteps 20000 --skip-check-env
+python python/train_baseline.py --timesteps 20000 --skip-check-env
 ```
 
 Training output summary:
@@ -378,22 +370,11 @@ Positive target success rate: 100.0% (9 episodes)
 Negative target success rate: 100.0% (11 episodes)
 ```
 
-For comparison, the earlier PPO baseline was useful for validating the training
-pipeline, but it was weaker on this task:
-
-```text
-PPO success rate: 50.0%
-PPO mean final error: 0.0949
-PPO positive target success rate: 0.0%
-PPO negative target success rate: 100.0%
-```
-
 So the current status is:
 
 ```text
 ArtiSynth/Python RL pipeline: working
 heuristic control: working
-PPO baseline: working but weak
 SAC baseline: strong on the simple antagonist model
 Amir-like state/action REST shape: partially implemented
 generic action-to-exciter controller loop: implemented
