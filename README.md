@@ -41,7 +41,7 @@ This prototype demonstrates the full RL communication pipeline:
 - Python sends action values through REST.
 - `SimpleRlController` applies those values to ArtiSynth `MuscleExciter`s.
 - Python reads the updated marker/target state after simulation advances.
-- Stable-Baselines3 PPO can train against the environment.
+- Stable-Baselines3 PPO or SAC can train against the environment.
 
 This is still a practice model, not the final TMJ biomechanics model. It is the
 minimal working version of the ArtiSynth-Python RL interface.
@@ -54,7 +54,9 @@ src/artisynth/models/tmj/practice/
   SimpleRlController.java
 
 python/
+  reward.py
   tmj_practice_env.py
+  evaluate_policy.py
   run_env_smoke_test.py
   train_baseline.py
   send_action_test.py
@@ -74,12 +76,15 @@ python/
 - `leftExciter`, `rightExciter`: muscle excitation inputs
 - REST server on `http://localhost:8081`
 
-`SimpleRlController.java` stores the latest Python action and applies it during
-the ArtiSynth simulation step:
+`SimpleRlController.java` stores the latest Python action vector and applies it
+during the ArtiSynth simulation step. Internally, it is now written as a
+generic action-to-exciter loop, so the same pattern can be extended from two
+toy muscles to more muscle exciters later:
 
 ```java
-leftExciter.setExcitation(actions[0]);
-rightExciter.setExcitation(actions[1]);
+for (int i = 0; i < exciters.length; i++) {
+   exciters[i].setExcitation(actions[i]);
+}
 ```
 
 The muscle material is configured to avoid passive spring forces dominating the
@@ -105,6 +110,8 @@ GET  /state             current model state
 GET  /excitations       current action vector
 POST /excitations       set action vector
 POST /reset             reset box/action and randomize target
+POST /setSeed           set Java target randomization seed
+POST /setTest           store test/evaluation mode flag
 ```
 
 Expected sizes for the current model:
@@ -119,6 +126,20 @@ Example state fields:
 
 ```json
 {
+  "time": 12.34,
+  "observation": {
+    "marker": {
+      "position": [0.0, 0.0, 0.0],
+      "velocity": [0.0, 0.0, 0.0]
+    },
+    "target": {
+      "position": [-0.112647, 0.0, 0.0],
+      "velocity": [0.0, 0.0, 0.0]
+    }
+  },
+  "excitations": [0.0, 0.0],
+  "muscleForces": [0.0, 0.0],
+  "properties": [],
   "markerPosition": [0.0, 0.0, 0.0],
   "markerVelocity": [0.0, 0.0, 0.0],
   "targetPosition": [-0.112647, 0.0, 0.0],
@@ -131,6 +152,11 @@ Example state fields:
 }
 ```
 
+The nested `observation` / `excitations` / `muscleForces` fields are included
+to make the response closer to Amir's REST state format. The flat fields are
+kept for readability and backward compatibility with the early prototype
+scripts.
+
 ## Python Side
 
 `python/tmj_practice_env.py` implements a Gymnasium-style environment:
@@ -140,12 +166,25 @@ observation, info = env.reset()
 observation, reward, terminated, truncated, info = env.step(action)
 ```
 
+It can optionally launch ArtiSynth if the REST server is not already alive by
+passing `launch_command`.
+
+`python/reward.py` contains the reward configuration and reward function. This
+keeps the reward separate from the REST/environment wrapper so it can later be
+replaced with a TMJ-specific reward.
+
 `python/run_env_smoke_test.py` uses a simple hand-coded policy:
 
 - if the target is left of the marker, activate the left muscle
 - if the target is right of the marker, activate the right muscle
 
-`python/train_baseline.py` trains a Stable-Baselines3 PPO baseline.
+`python/train_baseline.py` trains a Stable-Baselines3 PPO or SAC baseline. By
+default it exposes normalized `[-1, 1]` actions to the RL policy and maps them
+internally to ArtiSynth excitation values in `[0, 1]`.
+
+`python/evaluate_policy.py` loads a saved PPO/SAC model and writes step-level CSV
+logs with marker position, target position, tracking error, actions, forces,
+reward, and episode flags.
 
 ## Observation
 
@@ -166,19 +205,22 @@ total                     18
 
 ## Reward Function
 
-The actual training reward is computed in Python in
-`python/tmj_practice_env.py`.
+The actual training reward is computed in Python in `python/reward.py`.
 
 Current reward:
 
 ```python
 progress = previous_distance - current_distance
 effort = left_action**2 + right_action**2
+velocity = norm(marker_velocity)
+action_change = norm(current_action - previous_action)**2
 
 reward = (
     progress_reward_scale * progress
     - distance_penalty_scale * current_distance
     - effort_penalty_scale * effort
+    - velocity_penalty_scale * velocity
+    - action_change_penalty_scale * action_change
 )
 ```
 
@@ -196,6 +238,8 @@ Current default weights:
 progress_reward_scale = 20.0
 distance_penalty_scale = 1.0
 effort_penalty_scale = 0.01
+velocity_penalty_scale = 0.02
+action_change_penalty_scale = 0.005
 goal_threshold = 0.01
 goal_reward = 5.0
 ```
@@ -205,6 +249,7 @@ Meaning:
 - reward increases when the marker moves closer to the target
 - reward decreases when the marker remains far from the target
 - large muscle excitation is mildly penalized
+- high marker velocity and abrupt action changes can be mildly penalized
 - reaching the target gives a terminal reward
 
 ## How To Run
@@ -238,13 +283,39 @@ Run the smoke test:
 python python/run_env_smoke_test.py
 ```
 
-Run PPO training:
+Run SAC training, recommended next baseline:
 
 ```bash
-python python/train_baseline.py --timesteps 4096 --skip-check-env
+python python/train_baseline.py --algo sac --timesteps 20000 --skip-check-env
+```
+
+Run PPO training, for comparison with the earlier baseline:
+
+```bash
+python python/train_baseline.py --algo ppo --timesteps 20000 --skip-check-env
 ```
 
 The trained model is saved under `runs/`, which is ignored by git.
+
+Evaluate a saved policy and write a CSV log:
+
+```bash
+python python/evaluate_policy.py \
+  --algo sac \
+  --model-path runs/sac_tmj_practice.zip \
+  --episodes 20 \
+  --output runs/evaluation.csv
+```
+
+Optional auto-launch pattern:
+
+```bash
+python python/train_baseline.py \
+  --algo sac \
+  --launch-command "artisynth -model artisynth.models.tmj.practice.MuscleExcitationPrototype -play" \
+  --timesteps 20000 \
+  --skip-check-env
+```
 
 ## Current Results
 
@@ -265,7 +336,8 @@ This verifies that:
 - ArtiSynth moves the marker toward the target
 - Python receives the updated state and termination condition
 
-The current PPO baseline also begins to learn meaningful directional actions.
+The current PPO baseline also begins to learn meaningful directional actions,
+but remains an early, weak baseline.
 Example after 4096 timesteps:
 
 ```text
@@ -288,6 +360,9 @@ So the current status is:
 ArtiSynth/Python RL pipeline: working
 heuristic control: working
 PPO baseline: running and directionally meaningful
+SAC baseline: added as the recommended next performance-improvement baseline
+Amir-like state/action REST shape: partially implemented
+generic action-to-exciter controller loop: implemented
 policy quality: needs more training/reward tuning
 ```
 
@@ -295,6 +370,5 @@ policy quality: needs more training/reward tuning
 
 - Train longer and compare learning curves.
 - Tune reward weights and threshold.
-- Add a cleaner evaluation script for saved policies.
 - Move from this point-to-point practice model toward a real TMJ/jaw model.
 - Extend the action vector from two toy muscles to actual jaw muscle groups.

@@ -7,12 +7,18 @@ os.environ.setdefault(
     os.path.join(tempfile.gettempdir(), "tmj_rl_matplotlib"),
 )
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, SAC
 from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 
 from tmj_practice_env import TmjPracticeEnv
+
+
+ALGORITHMS = {
+    "ppo": PPO,
+    "sac": SAC,
+}
 
 
 def make_env(args):
@@ -26,17 +32,23 @@ def make_env(args):
         progress_reward_scale=args.progress_reward_scale,
         distance_penalty_scale=args.distance_penalty_scale,
         effort_penalty_scale=args.effort_penalty_scale,
+        velocity_penalty_scale=args.velocity_penalty_scale,
+        action_change_penalty_scale=args.action_change_penalty_scale,
+        normalize_actions=not args.raw_actions,
         use_simulation_time=not args.wall_clock_wait,
+        launch_command=args.launch_command,
+        launch_timeout=args.launch_timeout,
     )
     return Monitor(env)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train a PPO baseline on the simple TMJ practice env."
+        description="Train an RL baseline on the simple TMJ practice env."
     )
+    parser.add_argument("--algo", choices=sorted(ALGORITHMS), default="sac")
     parser.add_argument("--base-url", default="http://localhost:8081")
-    parser.add_argument("--timesteps", type=int, default=512)
+    parser.add_argument("--timesteps", type=int, default=5000)
     parser.add_argument("--wait-action", type=float, default=0.05)
     parser.add_argument("--reset-wait", type=float, default=0.05)
     parser.add_argument("--max-episode-steps", type=int, default=40)
@@ -45,7 +57,23 @@ def main():
     parser.add_argument("--progress-reward-scale", type=float, default=20.0)
     parser.add_argument("--distance-penalty-scale", type=float, default=1.0)
     parser.add_argument("--effort-penalty-scale", type=float, default=0.01)
-    parser.add_argument("--save-path", default="runs/ppo_tmj_practice")
+    parser.add_argument("--velocity-penalty-scale", type=float, default=0.02)
+    parser.add_argument("--action-change-penalty-scale", type=float, default=0.005)
+    parser.add_argument("--save-path", default=None)
+    parser.add_argument(
+        "--raw-actions",
+        action="store_true",
+        help=(
+            "Expose [0, 1] actions directly. By default the policy sees "
+            "[-1, 1] and actions are mapped to [0, 1] excitations."
+        ),
+    )
+    parser.add_argument(
+        "--launch-command",
+        default=None,
+        help="Optional command used to launch ArtiSynth if REST is not alive.",
+    )
+    parser.add_argument("--launch-timeout", type=float, default=60.0)
     parser.add_argument(
         "--wall-clock-wait",
         action="store_true",
@@ -58,6 +86,9 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.save_path is None:
+        args.save_path = f"runs/{args.algo}_tmj_practice"
+
     save_dir = os.path.dirname(args.save_path)
     if save_dir:
         os.makedirs(save_dir, exist_ok=True)
@@ -68,17 +99,34 @@ def main():
         print("Checking Stable-Baselines3 environment compatibility...")
         check_env(env.unwrapped, warn=True)
 
-    print("Training PPO baseline...")
-    model = PPO(
-        "MlpPolicy",
-        env,
-        verbose=1,
-        n_steps=64,
-        batch_size=32,
-        learning_rate=3e-4,
-        gamma=0.95,
-        device="cpu",
-    )
+    print(f"Training {args.algo.upper()} baseline...")
+    model_class = ALGORITHMS[args.algo]
+    if args.algo == "ppo":
+        model = model_class(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            n_steps=128,
+            batch_size=64,
+            learning_rate=3e-4,
+            gamma=0.98,
+            device="cpu",
+        )
+    else:
+        model = model_class(
+            "MlpPolicy",
+            env,
+            verbose=1,
+            buffer_size=20000,
+            learning_starts=200,
+            batch_size=64,
+            learning_rate=3e-4,
+            gamma=0.98,
+            tau=0.02,
+            train_freq=1,
+            gradient_steps=1,
+            device="cpu",
+        )
     model.learn(total_timesteps=args.timesteps)
 
     model.save(args.save_path)
@@ -106,6 +154,8 @@ def main():
         print(
             step,
             "action =", [round(float(x), 3) for x in action],
+            "excitations =",
+            [round(float(x), 3) for x in info["commandedExcitations"]],
             "reward =", round(float(reward), 4),
             "terminated =", terminated,
             "truncated =", truncated,

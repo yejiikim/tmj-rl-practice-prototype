@@ -1,8 +1,12 @@
+import shlex
+import subprocess
 import time
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import requests
+
+from reward import TrackingRewardConfig, compute_tracking_reward
 
 try:
     import gymnasium as gym
@@ -36,31 +40,50 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         progress_reward_scale: float = 20.0,
         distance_penalty_scale: float = 1.0,
         effort_penalty_scale: float = 0.01,
+        velocity_penalty_scale: float = 0.0,
+        action_change_penalty_scale: float = 0.0,
+        normalize_actions: bool = False,
         use_simulation_time: bool = True,
         simulation_time_timeout: float = 5.0,
+        launch_command: Optional[str] = None,
+        launch_timeout: float = 60.0,
     ):
         self.base_url = base_url.rstrip("/")
         self.wait_action = wait_action
         self.reset_wait = reset_wait
-        self.goal_threshold = goal_threshold
         self.max_episode_steps = max_episode_steps
-        self.goal_reward = goal_reward
-        self.progress_reward_scale = progress_reward_scale
-        self.distance_penalty_scale = distance_penalty_scale
-        self.effort_penalty_scale = effort_penalty_scale
+        self.reward_config = TrackingRewardConfig(
+            goal_threshold=goal_threshold,
+            goal_reward=goal_reward,
+            progress_reward_scale=progress_reward_scale,
+            distance_penalty_scale=distance_penalty_scale,
+            effort_penalty_scale=effort_penalty_scale,
+            velocity_penalty_scale=velocity_penalty_scale,
+            action_change_penalty_scale=action_change_penalty_scale,
+        )
+        self.normalize_actions = normalize_actions
         self.use_simulation_time = use_simulation_time
         self.simulation_time_timeout = simulation_time_timeout
+        self.launch_command = launch_command
+        self.launch_timeout = launch_timeout
+        self.launch_process: Optional[subprocess.Popen] = None
 
         self.elapsed_steps = 0
         self.prev_distance: Optional[float] = None
+        self.previous_action_excitation: Optional[np.ndarray] = None
+
+        if self.launch_command is not None and not self.server_is_alive():
+            self._launch_artisynth()
 
         self.action_size = int(self._get("actionSize"))
         self.obs_size = int(self._get("obsSize"))
 
         if spaces is not None:
+            action_low = -1.0 if self.normalize_actions else 0.0
+            action_high = 1.0
             self.action_space = spaces.Box(
-                low=0.0,
-                high=1.0,
+                low=action_low,
+                high=action_high,
                 shape=(self.action_size,),
                 dtype=np.float32,
             )
@@ -84,7 +107,8 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         self._wait(self.reset_wait)
         state = self._get("state")
         self.elapsed_steps = 0
-        self.prev_distance = float(state["trackingError"])
+        self.prev_distance = self._tracking_error(state)
+        self.previous_action_excitation = np.zeros(self.action_size, dtype=np.float32)
 
         observation = self._state_to_observation(state)
         info = self._state_to_info(state)
@@ -94,15 +118,20 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         self,
         action: np.ndarray,
     ) -> Tuple[np.ndarray, float, bool, bool, Dict[str, Any]]:
-        action_array = np.asarray(action, dtype=np.float32).reshape(-1)
-        if action_array.shape[0] != self.action_size:
+        policy_action = np.asarray(action, dtype=np.float32).reshape(-1)
+        if policy_action.shape[0] != self.action_size:
             raise ValueError(
                 f"Expected action with size {self.action_size}, "
-                f"got {action_array.shape[0]}"
+                f"got {policy_action.shape[0]}"
             )
 
-        action_array = np.clip(action_array, 0.0, 1.0)
-        self._post("excitations", {"excitations": action_array.tolist()})
+        if self.normalize_actions:
+            policy_action = np.clip(policy_action, -1.0, 1.0)
+        else:
+            policy_action = np.clip(policy_action, 0.0, 1.0)
+
+        excitation_action = self.policy_action_to_excitations(policy_action)
+        self._post("excitations", {"excitations": excitation_action.tolist()})
 
         # This matches Amir's high-level pattern: action is sent, ArtiSynth
         # simulation time advances, then Python reads the next state.
@@ -111,17 +140,45 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         state = self._get("state")
         self.elapsed_steps += 1
 
-        distance = float(state["trackingError"])
-        reward, terminated = self._calculate_reward(distance, action_array)
+        distance = self._tracking_error(state)
+        marker_velocity = self._component_vector(
+            state, ("marker",), "velocity", "markerVelocity"
+        )
+        reward, terminated = compute_tracking_reward(
+            distance,
+            self.prev_distance,
+            excitation_action,
+            self.reward_config,
+            velocity_norm=float(np.linalg.norm(marker_velocity)),
+            previous_action=self.previous_action_excitation,
+        )
         truncated = self.elapsed_steps >= self.max_episode_steps
 
         observation = self._state_to_observation(state)
         info = self._state_to_info(state)
-        info["action"] = action_array.copy()
+        info["policyAction"] = policy_action.copy()
+        info["commandedExcitations"] = excitation_action.copy()
+        info["action"] = excitation_action.copy()
         info["previousDistance"] = self.prev_distance
 
         self.prev_distance = distance
+        self.previous_action_excitation = excitation_action.copy()
         return observation, reward, terminated, truncated, info
+
+    def policy_action_to_excitations(self, action: np.ndarray) -> np.ndarray:
+        """Map policy action space to ArtiSynth excitation values."""
+        action = np.asarray(action, dtype=np.float32)
+        if self.normalize_actions:
+            return np.asarray(0.5 * (action + 1.0), dtype=np.float32)
+        return np.asarray(np.clip(action, 0.0, 1.0), dtype=np.float32)
+
+    def excitations_to_policy_action(self, excitations: np.ndarray) -> np.ndarray:
+        """Map ArtiSynth excitation values to the policy action space."""
+        excitations = np.asarray(excitations, dtype=np.float32)
+        excitations = np.clip(excitations, 0.0, 1.0)
+        if self.normalize_actions:
+            return np.asarray(2.0 * excitations - 1.0, dtype=np.float32)
+        return excitations
 
     def server_is_alive(self) -> bool:
         try:
@@ -129,26 +186,6 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
             return response.ok
         except requests.RequestException:
             return False
-
-    def _calculate_reward(
-        self,
-        distance: float,
-        action: np.ndarray,
-    ) -> Tuple[float, bool]:
-        if distance <= self.goal_threshold:
-            return self.goal_reward, True
-
-        if self.prev_distance is None:
-            return 0.0, False
-
-        progress = self.prev_distance - distance
-        effort = float(np.sum(np.square(action)))
-        reward = (
-            self.progress_reward_scale * progress
-            - self.distance_penalty_scale * distance
-            - self.effort_penalty_scale * effort
-        )
-        return float(reward), False
 
     def _wait(self, duration: float) -> None:
         if duration <= 0.0:
@@ -169,23 +206,53 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
                 )
             time.sleep(0.002)
 
+    def close(self) -> None:
+        if self.launch_process is not None and self.launch_process.poll() is None:
+            self.launch_process.terminate()
+
+    def _launch_artisynth(self) -> None:
+        self.launch_process = subprocess.Popen(
+            shlex.split(self.launch_command),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+        )
+        deadline = time.time() + self.launch_timeout
+        while time.time() < deadline:
+            if self.server_is_alive():
+                return
+            time.sleep(0.5)
+        raise TimeoutError(
+            "ArtiSynth REST server did not start before launch_timeout."
+        )
+
     def _state_to_observation(self, state: Dict[str, Any]) -> np.ndarray:
+        marker_position = self._component_vector(
+            state, ("marker",), "position", "markerPosition"
+        )
+        marker_velocity = self._component_vector(
+            state, ("marker",), "velocity", "markerVelocity"
+        )
+        target_position = self._component_vector(
+            state, ("target",), "position", "targetPosition"
+        )
         action_excitations = self._array_value(
-            state, "actionExcitations", "actionExcitation"
+            state, ("actionExcitations", "excitations"), "actionExcitation"
         )
         exciter_excitations = self._array_value(
-            state, "exciterExcitations", "exciterExcitation"
+            state, ("exciterExcitations", "excitations"), "exciterExcitation"
         )
         muscle_excitations = self._array_value(
-            state, "muscleExcitations", "muscleExcitation"
+            state, ("muscleExcitations", "excitations"), "muscleExcitation"
         )
-        muscle_forces = self._array_value(state, "muscleForces", "muscleForce")
+        muscle_forces = self._array_value(
+            state, ("muscleForces",), "muscleForce"
+        )
 
         values = []
-        values.extend(state["markerPosition"])
-        values.extend(state["markerVelocity"])
-        values.extend(state["targetPosition"])
-        values.append(state["trackingError"])
+        values.extend(marker_position)
+        values.extend(marker_velocity)
+        values.extend(target_position)
+        values.append(self._tracking_error(state))
         values.extend(action_excitations)
         values.extend(exciter_excitations)
         values.extend(muscle_excitations)
@@ -193,22 +260,35 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
         return np.asarray(values, dtype=np.float32)
 
     def _state_to_info(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        marker_position = self._component_vector(
+            state, ("marker",), "position", "markerPosition"
+        )
+        marker_velocity = self._component_vector(
+            state, ("marker",), "velocity", "markerVelocity"
+        )
+        target_position = self._component_vector(
+            state, ("target",), "position", "targetPosition"
+        )
         action_excitations = self._array_value(
-            state, "actionExcitations", "actionExcitation"
+            state, ("actionExcitations", "excitations"), "actionExcitation"
         )
         exciter_excitations = self._array_value(
-            state, "exciterExcitations", "exciterExcitation"
+            state, ("exciterExcitations", "excitations"), "exciterExcitation"
         )
         muscle_excitations = self._array_value(
-            state, "muscleExcitations", "muscleExcitation"
+            state, ("muscleExcitations", "excitations"), "muscleExcitation"
         )
-        muscle_forces = self._array_value(state, "muscleForces", "muscleForce")
+        muscle_forces = self._array_value(
+            state, ("muscleForces",), "muscleForce"
+        )
 
         return {
-            "markerPosition": state["markerPosition"],
-            "markerVelocity": state["markerVelocity"],
-            "targetPosition": state["targetPosition"],
-            "trackingError": float(state["trackingError"]),
+            "time": float(state.get("time", 0.0)),
+            "markerPosition": marker_position,
+            "markerVelocity": marker_velocity,
+            "targetPosition": target_position,
+            "trackingError": self._tracking_error(state),
+            "distance": self._tracking_error(state),
             "actionExcitations": action_excitations,
             "exciterExcitations": exciter_excitations,
             "muscleExcitations": muscle_excitations,
@@ -221,12 +301,41 @@ class TmjPracticeEnv(gym.Env if gym is not None else _BaseEnv):
     def _array_value(
         self,
         state: Dict[str, Any],
-        array_key: str,
+        array_keys: Tuple[str, ...],
         scalar_key: str,
     ) -> np.ndarray:
-        if array_key in state:
-            return np.asarray(state[array_key], dtype=np.float32)
+        for key in array_keys:
+            if key in state:
+                return np.asarray(state[key], dtype=np.float32)
         return np.asarray([state[scalar_key]], dtype=np.float32)
+
+    def _component_vector(
+        self,
+        state: Dict[str, Any],
+        component_names: Tuple[str, ...],
+        prop: str,
+        flat_key: str,
+    ) -> np.ndarray:
+        observation = state.get("observation", {})
+        if isinstance(observation, dict):
+            for name in component_names:
+                component = observation.get(name)
+                if component is not None and prop in component:
+                    return np.asarray(component[prop], dtype=np.float32)
+
+        return np.asarray(state[flat_key], dtype=np.float32)
+
+    def _tracking_error(self, state: Dict[str, Any]) -> float:
+        if "trackingError" in state:
+            return float(state["trackingError"])
+
+        marker_position = self._component_vector(
+            state, ("marker",), "position", "markerPosition"
+        )
+        target_position = self._component_vector(
+            state, ("target",), "position", "targetPosition"
+        )
+        return float(np.linalg.norm(marker_position - target_position))
 
     def _get(self, endpoint: str) -> Any:
         response = requests.get(f"{self.base_url}/{endpoint}", timeout=5.0)

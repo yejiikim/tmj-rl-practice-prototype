@@ -52,6 +52,7 @@ public class MuscleExcitationPrototype extends RootModel {
    Random random = new Random();
    double targetMinX = -0.25;
    double targetMaxX = 0.25;
+   boolean testMode = false;
 
    public void build (String[] args) throws IOException {
 
@@ -107,7 +108,10 @@ public class MuscleExcitationPrototype extends RootModel {
       mech.addMuscleExciter (rightExciter);
 
       rlController = new SimpleRlController (
-         marker, target, leftMuscle, rightMuscle, leftExciter, rightExciter);
+         marker,
+         target,
+         new Muscle[] { leftMuscle, rightMuscle },
+         new MuscleExciter[] { leftExciter, rightExciter });
       addController (rlController);
 
       addControlPanel();
@@ -180,6 +184,8 @@ public class MuscleExcitationPrototype extends RootModel {
       restServer.createContext ("/state", new StateHandler());
       restServer.createContext ("/time", new TimeHandler());
       restServer.createContext ("/reset", new ResetHandler());
+      restServer.createContext ("/setSeed", new SetSeedHandler());
+      restServer.createContext ("/setTest", new SetTestHandler());
       restServer.setExecutor (null);
       restServer.start();
 
@@ -272,6 +278,43 @@ public class MuscleExcitationPrototype extends RootModel {
       }
    }
 
+   private class SetSeedHandler implements HttpHandler {
+      public void handle (HttpExchange exchange) throws IOException {
+         if (!exchange.getRequestMethod().equalsIgnoreCase ("POST")) {
+            sendText (exchange, 405, "{\"error\":\"Use POST\"}");
+            return;
+         }
+
+         try {
+            String body = readBody (exchange);
+            double[] values = parseNumbers (body);
+            long seed = Math.round (values[0]);
+            random.setSeed (seed);
+            sendText (
+               exchange, 200,
+               String.format (Locale.US, "{\"seed\":%d}", seed));
+         }
+         catch (Exception e) {
+            sendText (exchange, 400, "{\"error\":\"Could not parse seed\"}");
+         }
+      }
+   }
+
+   private class SetTestHandler implements HttpHandler {
+      public void handle (HttpExchange exchange) throws IOException {
+         if (!exchange.getRequestMethod().equalsIgnoreCase ("POST")) {
+            sendText (exchange, 405, "{\"error\":\"Use POST\"}");
+            return;
+         }
+
+         String body = readBody (exchange).trim().toLowerCase();
+         testMode = body.indexOf ("true") != -1;
+         sendText (
+            exchange, 200,
+            String.format (Locale.US, "{\"test\":%s}", testMode));
+      }
+   }
+
    private String readBody (HttpExchange exchange) throws IOException {
       BufferedReader reader = new BufferedReader (
          new InputStreamReader (
@@ -307,7 +350,7 @@ public class MuscleExcitationPrototype extends RootModel {
    }
 
    private synchronized void resetEpisode() {
-      rlController.setExcitations (new double[] { 0.0, 0.0 });
+      rlController.setExcitations (new double[rlController.getActionSize()]);
       leftExciter.setExcitation (0.0);
       rightExciter.setExcitation (0.0);
       leftMuscle.setExcitation (0.0);

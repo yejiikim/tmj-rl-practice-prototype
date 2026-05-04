@@ -2,6 +2,7 @@ package artisynth.models.tmj.practice;
 
 import java.util.Locale;
 
+import artisynth.core.driver.Main;
 import artisynth.core.mechmodels.FrameMarker;
 import artisynth.core.mechmodels.Muscle;
 import artisynth.core.mechmodels.MuscleExciter;
@@ -27,60 +28,72 @@ public class SimpleRlController extends ControllerBase {
 
    private FrameMarker marker;
    private Point target;
-   private Muscle leftMuscle;
-   private Muscle rightMuscle;
-   private MuscleExciter leftExciter;
-   private MuscleExciter rightExciter;
-
-   private double leftActionExcitation = 0.0;
-   private double rightActionExcitation = 0.0;
+   private Muscle[] muscles;
+   private MuscleExciter[] exciters;
+   private double[] actionExcitations;
 
    public SimpleRlController (
       FrameMarker marker,
       Point target,
-      Muscle leftMuscle,
-      Muscle rightMuscle,
-      MuscleExciter leftExciter,
-      MuscleExciter rightExciter) {
+      Muscle[] muscles,
+      MuscleExciter[] exciters) {
+
+      if (muscles == null || exciters == null || muscles.length != exciters.length) {
+         throw new IllegalArgumentException (
+            "Muscle and exciter arrays must have the same length");
+      }
+      if (muscles.length == 0) {
+         throw new IllegalArgumentException ("At least one muscle is required");
+      }
 
       this.marker = marker;
       this.target = target;
-      this.leftMuscle = leftMuscle;
-      this.rightMuscle = rightMuscle;
-      this.leftExciter = leftExciter;
-      this.rightExciter = rightExciter;
+      this.muscles = muscles;
+      this.exciters = exciters;
+      this.actionExcitations = new double[exciters.length];
    }
 
    public synchronized double getLeftActionExcitation() {
-      return leftActionExcitation;
+      return getActionExcitation (0);
    }
 
    public synchronized void setLeftActionExcitation (double value) {
-      leftActionExcitation = clamp01 (value);
+      setActionExcitation (0, value);
    }
 
    public synchronized double getRightActionExcitation() {
-      return rightActionExcitation;
+      if (getActionSize() < 2) {
+         return 0.0;
+      }
+      return getActionExcitation (1);
    }
 
    public synchronized void setRightActionExcitation (double value) {
-      rightActionExcitation = clamp01 (value);
+      if (getActionSize() >= 2) {
+         setActionExcitation (1, value);
+      }
    }
 
    public synchronized void setExcitations (double[] actions) {
-      if (actions == null || actions.length < 2) {
-         throw new IllegalArgumentException ("Expected two excitation values");
+      if (actions == null || actions.length < getActionSize()) {
+         throw new IllegalArgumentException (
+            "Expected " + getActionSize() + " excitation values");
       }
-      leftActionExcitation = clamp01 (actions[0]);
-      rightActionExcitation = clamp01 (actions[1]);
+      for (int i = 0; i < getActionSize(); i++) {
+         actionExcitations[i] = clamp01 (actions[i]);
+      }
    }
 
    public synchronized double[] getExcitations() {
-      return new double[] { leftActionExcitation, rightActionExcitation };
+      double[] copy = new double[actionExcitations.length];
+      for (int i = 0; i < actionExcitations.length; i++) {
+         copy[i] = actionExcitations[i];
+      }
+      return copy;
    }
 
    public int getActionSize() {
-      return 2;
+      return exciters.length;
    }
 
    public int getStateSize() {
@@ -93,8 +106,9 @@ public class SimpleRlController extends ControllerBase {
 
    public void apply (double t0, double t1) {
       double[] actions = getExcitations();
-      leftExciter.setExcitation (actions[0]);
-      rightExciter.setExcitation (actions[1]);
+      for (int i = 0; i < exciters.length; i++) {
+         exciters[i].setExcitation (actions[i]);
+      }
    }
 
    public double[] getState() {
@@ -113,52 +127,79 @@ public class SimpleRlController extends ControllerBase {
       Vector3d vel = marker.getVelocity();
       double error = getTrackingError();
       double[] actions = getExcitations();
+      double[] exciterValues = getExciterValues();
+      double[] muscleExcitations = getMuscleExcitationValues();
+      double[] muscleForces = getMuscleForceValues();
 
-      return new double[] {
-         pos.x, pos.y, pos.z,
-         vel.x, vel.y, vel.z,
-         targetPos.x, targetPos.y, targetPos.z,
-         error,
-         actions[0], actions[1],
-         leftExciter.getExcitation(), rightExciter.getExcitation(),
-         leftMuscle.getExcitation(), rightMuscle.getExcitation(),
-         leftMuscle.getForceNorm(), rightMuscle.getForceNorm(),
-      };
+      double[] observation = new double[10 + 4 * getActionSize()];
+      int idx = 0;
+
+      observation[idx++] = pos.x;
+      observation[idx++] = pos.y;
+      observation[idx++] = pos.z;
+      observation[idx++] = vel.x;
+      observation[idx++] = vel.y;
+      observation[idx++] = vel.z;
+      observation[idx++] = targetPos.x;
+      observation[idx++] = targetPos.y;
+      observation[idx++] = targetPos.z;
+      observation[idx++] = error;
+      idx = appendValues (observation, idx, actions);
+      idx = appendValues (observation, idx, exciterValues);
+      idx = appendValues (observation, idx, muscleExcitations);
+      appendValues (observation, idx, muscleForces);
+
+      return observation;
    }
 
    public String getExcitationsJson() {
-      double[] actions = getExcitations();
-      return String.format (Locale.US, "[%.6f,%.6f]", actions[0], actions[1]);
+      return vectorJson (getExcitations());
    }
 
    public String getStateJson() {
       Point3d pos = marker.getPosition();
       Point3d targetPos = target.getPosition();
       Vector3d vel = marker.getVelocity();
-      double error = getTrackingError();
+      Vector3d targetVel = target.getVelocity();
       double[] actions = getExcitations();
+      double[] exciterValues = getExciterValues();
+      double[] muscleExcitations = getMuscleExcitationValues();
+      double[] muscleForces = getMuscleForceValues();
 
       return String.format (
          Locale.US,
          "{"
-         + "\"markerPosition\":[%.6f,%.6f,%.6f],"
-         + "\"markerVelocity\":[%.6f,%.6f,%.6f],"
-         + "\"targetPosition\":[%.6f,%.6f,%.6f],"
+         + "\"time\":%.6f,"
+         + "\"observation\":{"
+         + "\"marker\":{\"position\":%s,\"velocity\":%s},"
+         + "\"target\":{\"position\":%s,\"velocity\":%s}"
+         + "},"
+         + "\"excitations\":%s,"
+         + "\"muscleForces\":%s,"
+         + "\"properties\":[],"
+         + "\"markerPosition\":%s,"
+         + "\"markerVelocity\":%s,"
+         + "\"targetPosition\":%s,"
          + "\"trackingError\":%.6f,"
-         + "\"actionExcitations\":[%.6f,%.6f],"
-         + "\"exciterExcitations\":[%.6f,%.6f],"
-         + "\"muscleExcitations\":[%.6f,%.6f],"
-         + "\"muscleForces\":[%.6f,%.6f],"
+         + "\"actionExcitations\":%s,"
+         + "\"exciterExcitations\":%s,"
+         + "\"muscleExcitations\":%s,"
          + "\"rewardLike\":%.6f"
          + "}",
-         pos.x, pos.y, pos.z,
-         vel.x, vel.y, vel.z,
-         targetPos.x, targetPos.y, targetPos.z,
-         error,
-         actions[0], actions[1],
-         leftExciter.getExcitation(), rightExciter.getExcitation(),
-         leftMuscle.getExcitation(), rightMuscle.getExcitation(),
-         leftMuscle.getForceNorm(), rightMuscle.getForceNorm(),
+         getCurrentTime(),
+         pointJson (pos),
+         vectorJson (vel),
+         pointJson (targetPos),
+         vectorJson (targetVel),
+         vectorJson (actions),
+         vectorJson (muscleForces),
+         pointJson (pos),
+         vectorJson (vel),
+         pointJson (targetPos),
+         getTrackingError(),
+         vectorJson (actions),
+         vectorJson (exciterValues),
+         vectorJson (muscleExcitations),
          getRewardLikeValue());
    }
 
@@ -173,11 +214,85 @@ public class SimpleRlController extends ControllerBase {
 
    public double getRewardLikeValue() {
       double error = getTrackingError();
-      double effort =
-         leftActionExcitation * leftActionExcitation
-         + rightActionExcitation * rightActionExcitation;
-      double coactivation = leftActionExcitation * rightActionExcitation;
+      double effort = 0.0;
+      double coactivation = 1.0;
+      double[] actions = getExcitations();
+
+      for (int i = 0; i < actions.length; i++) {
+         effort += actions[i] * actions[i];
+         coactivation *= actions[i];
+      }
+      if (actions.length < 2) {
+         coactivation = 0.0;
+      }
       return -error * error - 0.01 * effort - 0.02 * coactivation;
+   }
+
+   private synchronized double getActionExcitation (int idx) {
+      return actionExcitations[idx];
+   }
+
+   private synchronized void setActionExcitation (int idx, double value) {
+      actionExcitations[idx] = clamp01 (value);
+   }
+
+   private double[] getExciterValues() {
+      double[] values = new double[exciters.length];
+      for (int i = 0; i < exciters.length; i++) {
+         values[i] = exciters[i].getExcitation();
+      }
+      return values;
+   }
+
+   private double[] getMuscleExcitationValues() {
+      double[] values = new double[muscles.length];
+      for (int i = 0; i < muscles.length; i++) {
+         values[i] = muscles[i].getExcitation();
+      }
+      return values;
+   }
+
+   private double[] getMuscleForceValues() {
+      double[] values = new double[muscles.length];
+      for (int i = 0; i < muscles.length; i++) {
+         values[i] = muscles[i].getForceNorm();
+      }
+      return values;
+   }
+
+   private int appendValues (double[] dest, int idx, double[] values) {
+      for (int i = 0; i < values.length; i++) {
+         dest[idx++] = values[i];
+      }
+      return idx;
+   }
+
+   private String pointJson (Point3d point) {
+      return String.format (
+         Locale.US, "[%.6f,%.6f,%.6f]", point.x, point.y, point.z);
+   }
+
+   private String vectorJson (Vector3d vector) {
+      return String.format (
+         Locale.US, "[%.6f,%.6f,%.6f]", vector.x, vector.y, vector.z);
+   }
+
+   private String vectorJson (double[] values) {
+      StringBuilder sb = new StringBuilder();
+      sb.append ("[");
+      for (int i = 0; i < values.length; i++) {
+         if (i > 0) {
+            sb.append (",");
+         }
+         sb.append (String.format (Locale.US, "%.6f", values[i]));
+      }
+      sb.append ("]");
+      return sb.toString();
+   }
+
+   private double getCurrentTime() {
+      Main main = Main.getMain();
+      return main == null ? 0.0 : main.getTime();
    }
 
    private double clamp01 (double value) {
