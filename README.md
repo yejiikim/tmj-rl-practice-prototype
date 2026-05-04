@@ -319,12 +319,12 @@ python python/train_baseline.py \
 
 ## Current Results
 
-The current smoke test succeeds. Example:
+The current smoke test succeeds. Example from the simple hand-coded controller:
 
 ```text
-target x = -0.1137
-marker x = 0.0000 -> -0.0184 -> -0.0590 -> -0.1071
-error    = 0.1137 ->  0.0952 ->  0.0547 ->  0.0066
+target x = 0.1422
+marker x = 0.0000 -> 0.0230 -> 0.0738 -> 0.1543 -> 0.2033 -> 0.2276 -> 0.2249 -> 0.2007 -> 0.1350
+error    = 0.1422 -> 0.1191 -> 0.0684 -> 0.0122 -> 0.0612 -> 0.0854 -> 0.0828 -> 0.0585 -> 0.0072
 result   = terminated=True
 ```
 
@@ -333,37 +333,71 @@ This verifies that:
 - Python reads the target state
 - Python sends a left/right excitation action
 - Java applies the action through `MuscleExciter`s
-- ArtiSynth moves the marker toward the target
+- ArtiSynth moves the marker through the muscle model
 - Python receives the updated state and termination condition
 
-The current PPO baseline also begins to learn meaningful directional actions,
-but remains an early, weak baseline.
-Example after 4096 timesteps:
+The hand-coded smoke-test controller can overshoot the target, but it still
+confirms that the REST, controller, excitation, force, state, and termination
+loop is working.
 
-```text
-target x = 0.069
-action   = [0.0, 0.12]
-marker x = 0.0000 -> 0.0496
-error    = 0.0690 -> 0.0194
-result   = truncated=True
+The current SAC baseline learns a strong policy for this simple antagonist
+tracking task. Latest SAC training command:
+
+```bash
+python python/train_baseline.py --algo sac --timesteps 20000 --skip-check-env
 ```
 
-Interpretation:
+Training output summary:
 
-- the policy selected the right muscle for a positive target
-- tracking error decreased substantially
-- the baseline did not always reach the stricter `0.01` threshold yet
+```text
+Saved model to runs/sac_tmj_practice.zip
+Evaluation mean reward: 7.243 +/- 0.647
+```
+
+Post-training sample episode:
+
+```text
+target x = 0.1862
+marker x = 0.0000 -> 0.0392 -> 0.1095 -> 0.1525 -> 0.1739 -> 0.1873
+error    = 0.1861 -> 0.1470 -> 0.0767 -> 0.0336 -> 0.0123 -> 0.0011
+result   = terminated=True
+```
+
+Twenty-episode SAC evaluation:
+
+```text
+Episodes: 20
+Successes: 20/20
+Success rate: 100.0%
+Truncated episodes: 0/20
+Mean return: 6.7767
+Mean final error: 0.0038
+Median final error: 0.0027
+Mean min error: 0.0038
+Positive target success rate: 100.0% (9 episodes)
+Negative target success rate: 100.0% (11 episodes)
+```
+
+For comparison, the earlier PPO baseline was useful for validating the training
+pipeline, but it was weaker on this task:
+
+```text
+PPO success rate: 50.0%
+PPO mean final error: 0.0949
+PPO positive target success rate: 0.0%
+PPO negative target success rate: 100.0%
+```
 
 So the current status is:
 
 ```text
 ArtiSynth/Python RL pipeline: working
 heuristic control: working
-PPO baseline: running and directionally meaningful
-SAC baseline: added as the recommended next performance-improvement baseline
+PPO baseline: working but weak
+SAC baseline: strong on the simple antagonist model
 Amir-like state/action REST shape: partially implemented
 generic action-to-exciter controller loop: implemented
-policy quality: needs more training/reward tuning
+full TMJ/jaw RL transfer: not yet
 ```
 
 ## Next Steps
