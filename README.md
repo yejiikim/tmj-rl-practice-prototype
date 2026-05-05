@@ -322,7 +322,6 @@ marker x = 0.0000 -> 0.0230 -> 0.0738 -> 0.1543 -> 0.2033 -> 0.2276 -> 0.2249 ->
 error    = 0.1422 -> 0.1191 -> 0.0684 -> 0.0122 -> 0.0612 -> 0.0854 -> 0.0828 -> 0.0585 -> 0.0072
 result   = terminated=True
 ```
-<img width="1530" height="752" alt="image" src="https://github.com/user-attachments/assets/7246db4b-d0a7-487b-8437-4f96e10d9515" />
 
 This verifies that:
 
@@ -373,6 +372,7 @@ Mean min error: 0.0038
 Positive target success rate: 100.0% (9 episodes)
 Negative target success rate: 100.0% (11 episodes)
 ```
+<img width="1530" height="752" alt="image" src="https://github.com/user-attachments/assets/7246db4b-d0a7-487b-8437-4f96e10d9515" />
 
 So the current status is:
 
