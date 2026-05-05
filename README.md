@@ -122,6 +122,8 @@ actionSize = 2
 obsSize    = 18
 stateSize  = 19
 ```
+<img width="2048" height="406" alt="image" src="https://github.com/user-attachments/assets/585fdfb0-e975-4b75-821e-c1c160647399" />
+
 
 Example state fields:
 
@@ -320,6 +322,7 @@ marker x = 0.0000 -> 0.0230 -> 0.0738 -> 0.1543 -> 0.2033 -> 0.2276 -> 0.2249 ->
 error    = 0.1422 -> 0.1191 -> 0.0684 -> 0.0122 -> 0.0612 -> 0.0854 -> 0.0828 -> 0.0585 -> 0.0072
 result   = terminated=True
 ```
+<img width="1530" height="752" alt="image" src="https://github.com/user-attachments/assets/7246db4b-d0a7-487b-8437-4f96e10d9515" />
 
 This verifies that:
 
