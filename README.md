@@ -18,6 +18,7 @@ Python policy
 ## Current Prototype
 
 The current model is a two-muscle antagonist point-to-point task.
+<img width="576" height="350" alt="image" src="https://github.com/user-attachments/assets/22c6afe2-039d-4973-a48d-bff63921fce0" />
 
 - A rigid box carries a marker.
 - A fixed left anchor and fixed right anchor define two opposing muscles.
