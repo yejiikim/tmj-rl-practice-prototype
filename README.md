@@ -311,6 +311,7 @@ python python/train_baseline.py \
   --timesteps 20000 \
   --skip-check-env
 ```
+<img width="400" height="260" alt="Screen Recording 2026-05-04 at 3 39 41 PM" src="https://github.com/user-attachments/assets/324c0544-d3c8-4299-aaae-0dd8f29dfb64" />
 
 ## Current Results
 
