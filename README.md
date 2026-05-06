@@ -386,9 +386,3 @@ generic action-to-exciter controller loop: implemented
 full TMJ/jaw RL transfer: not yet
 ```
 
-## Next Steps
-
-- Train longer and compare learning curves.
-- Tune reward weights and threshold.
-- Move from this point-to-point practice model toward a real TMJ/jaw model.
-- Extend the action vector from two toy muscles to actual jaw muscle groups.
