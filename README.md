@@ -66,7 +66,7 @@ The ArtiSynth model consists of:
 
 The structure is:
 
-<img width="500" height="104" alt="image" src="https://github.com/user-attachments/assets/a5d03215-a796-4171-a31d-803770486478" />
+<img width="480" height="200" alt="image" src="https://github.com/user-attachments/assets/a5d03215-a796-4171-a31d-803770486478" />
 
 
 ```text
