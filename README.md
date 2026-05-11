@@ -385,6 +385,7 @@ actionSize = 2
 obsSize = 18
 stateSize = 19
 ```
+<img width="577" height="231" alt="Last login Mon May 11 115 41 on ttys815" src="https://github.com/user-attachments/assets/1fe175c0-d105-4c24-a229-34e6cb809d1d" />
 
 ### 3. Install Python dependencies
 
@@ -398,6 +399,8 @@ pip install -r requirements.txt
 ```bash
 python run_env_smoke_test.py
 ```
+<img width="617" height="326" alt="(base) gim-ye1101p149-148-255-283 tm)_python_client  optanaconds3binpythonrun_en" src="https://github.com/user-attachments/assets/51c3cc73-714e-4882-8682-8c24966ae69b" />
+
 
 ### 5. Train SAC
 
@@ -418,6 +421,8 @@ Model `.zip` files are ignored by git.
 ```bash
 python evaluate_policy.py --episodes 50 --output runs/evaluation_sac_50.csv
 ```
+<img width="611" height="201" alt="base) 91m-ye1p149-248-255-203 (a) python Client  optanaconda3binpythonevaiua" src="https://github.com/user-attachments/assets/cc974e2d-a086-4061-9615-cc2adf6510dc" />
+
 
 ### 7. Plot
 
