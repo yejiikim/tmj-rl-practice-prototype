@@ -11,11 +11,13 @@ os.environ.setdefault(
 
 from stable_baselines3 import SAC
 
-from tmj_practice_env import TmjPracticeEnv
+from antagonist_env import AntagonistMuscleEnv
 
 
 def make_env(args):
-    return TmjPracticeEnv(
+    """Create the REST-backed ArtiSynth environment."""
+
+    return AntagonistMuscleEnv(
         base_url=args.base_url,
         wait_action=args.wait_action,
         reset_wait=args.reset_wait,
@@ -82,6 +84,7 @@ def main():
         os.makedirs(output_dir, exist_ok=True)
 
     env = make_env(args)
+
     model = SAC.load(args.model_path)
 
     rows = []

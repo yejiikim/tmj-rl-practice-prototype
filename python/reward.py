@@ -6,6 +6,12 @@ import numpy as np
 
 @dataclass
 class TrackingRewardConfig:
+    """Weights for the simple marker-to-target reaching reward.
+
+    These values are hand-tuned for the prototype. They are not meant to be a
+    final TMJ objective.
+    """
+
     goal_threshold: float = 0.01
     goal_reward: float = 5.0
     progress_reward_scale: float = 20.0
@@ -23,6 +29,12 @@ def compute_tracking_reward(
     velocity_norm: float = 0.0,
     previous_action: Optional[np.ndarray] = None,
 ) -> Tuple[float, bool]:
+    """Compute the tracking reward and success flag.
+
+    The reward favors progress toward the target and penalizes distance,
+    excitation effort, velocity, and abrupt action changes.
+    """
+
     if distance <= config.goal_threshold:
         return config.goal_reward, True
 
@@ -30,7 +42,9 @@ def compute_tracking_reward(
         return 0.0, False
 
     progress = previous_distance - distance
+
     effort = float(np.sum(np.square(action)))
+
     action_change = 0.0
     if previous_action is not None:
         action_change = float(np.sum(np.square(action - previous_action)))

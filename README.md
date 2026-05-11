@@ -1,388 +1,451 @@
-# TMJ RL Practice Prototype
+# Simple Antagonist Muscle RL Prototype
 
-This repository contains a simple ArtiSynth + Python reinforcement-learning
-prototype inspired by the action/state loop used in
-[`amir-abdi/artisynth-rl`](https://github.com/amir-abdi/artisynth-rl).
+This repository contains a minimal ArtiSynth-Python reinforcement learning
+prototype for controlling muscle excitations through a REST interface.
 
-The goal is not to copy Amir's code directly. The goal is to rebuild the same
-core idea in a small, controllable practice model:
+The current model is intentionally simple: a marker attached to a dynamic rigid
+body is pulled by two opposing muscles, and the task is to move the marker to a
+target point. The main purpose is to validate the closed-loop connection between
+ArtiSynth and Python before moving toward a more complex TMJ/jaw model.
+
+This is not a complete generic ArtiSynth RL framework yet. It is a simple
+working demo with a first refactor toward a reusable REST/controller/Python
+environment structure.
+
+## Current Status
+
+The prototype currently supports:
+
+- a simple two-muscle antagonist model in ArtiSynth
+- REST communication between Java/ArtiSynth and Python
+- action commands applied through ArtiSynth `MuscleExciter`s
+- a Gym-style Python environment wrapper
+- SAC training with Stable-Baselines3
+- smoke testing, evaluation, CSV logging, and plotting
+
+The latest run used:
 
 ```text
-Python policy
--> sends muscle excitation action through REST
--> Java ArtiSynth controller applies it to MuscleExciters
--> ArtiSynth advances the physics
--> Python reads state, computes reward, and trains/evaluates a policy
+SAC training timesteps: 50000
+Evaluation episodes:   50
 ```
 
-## Current Prototype
-
-The current model is a two-muscle antagonist point-to-point task.
-<img width="576" height="350" alt="image" src="https://github.com/user-attachments/assets/22c6afe2-039d-4973-a48d-bff63921fce0" />
-
-- A rigid box carries a marker.
-- A fixed left anchor and fixed right anchor define two opposing muscles.
-- The left muscle pulls the marker left.
-- The right muscle pulls the marker right.
-- A target point is randomized on reset.
-- Python sends a two-dimensional action:
+Result:
 
 ```text
-[left_muscle_excitation, right_muscle_excitation]
+Successes:                    50/50
+Success rate:                 100.0%
+Truncated episodes:           0/50
+Mean return:                  7.5422
+Mean final tracking error:    0.0041
+Median final tracking error:  0.0034
+Mean minimum tracking error:  0.0041
+Positive target success rate: 100.0% (26 episodes)
+Negative target success rate: 100.0% (24 episodes)
 ```
 
-Each action value is clipped to `[0, 1]`.
-
-## What This Demonstrates
-
-This prototype demonstrates the full RL communication pipeline:
-
-- Java/ArtiSynth owns the physical model.
-- Python owns the RL environment wrapper and reward function.
-- Python sends action values through REST.
-- `SimpleRlController` applies those values to ArtiSynth `MuscleExciter`s.
-- Python reads the updated marker/target state after simulation advances.
-- Stable-Baselines3 SAC can train against the environment.
-
-This is still a practice model, not the final TMJ biomechanics model. It is the
-minimal working version of the ArtiSynth-Python RL interface.
-
-## Repository Layout
+The success threshold is:
 
 ```text
-src/artisynth/models/tmj/practice/
-  MuscleExcitationPrototype.java
-  SimpleRlController.java
+tracking error <= 0.01
+```
+
+These results should be interpreted as a proof-of-concept for the
+ArtiSynth-Python RL loop, not as a final biomechanics result.
+
+## Model Overview
+
+The ArtiSynth model consists of:
+
+- two fixed anchor points
+- one dynamic rigid body
+- one `FrameMarker` attached to the rigid body
+- one target point
+- two opposing muscles
+- two `MuscleExciter`s
+
+The structure is:
+
+```text
+left anchor -- left muscle -- marker/box -- right muscle -- right anchor
+                                |
+                              target
+```
+
+The tracked point is the `FrameMarker` attached to the dynamic rigid body. The
+target is a fixed `Particle`; its x-position is randomized at reset.
+
+The two muscles form a simple antagonist pair:
+
+- the left muscle pulls the marker/body to the left
+- the right muscle pulls the marker/body to the right
+
+Gravity is set to zero so the task focuses on muscle-driven point-to-point
+tracking.
+
+## Repository Structure
+
+```text
+java/
+  src/artisynth/models/tmj/practice/
+    AntagonistMuscleDemo.java
+    RlRestApi.java
+    RlController.java
+    MuscleExcitationRlController.java
+    AntagonistMuscleRlController.java
+    MuscleExcitationPrototype.java
+    SimpleRlController.java
 
 python/
-  reward.py
+  artisynth_base_env.py
+  antagonist_env.py
   tmj_practice_env.py
+  reward.py
+  train_baseline.py
   evaluate_policy.py
   run_env_smoke_test.py
-  train_baseline.py
   send_action_test.py
+  plot_evaluation.py
   requirements.txt
+
+results/
+  evaluation_sac_50.csv
+  tracking_error_sac_50.png
 ```
 
-## Java / ArtiSynth Side
+## Java Components
 
-`MuscleExcitationPrototype.java` builds the ArtiSynth model:
+### `AntagonistMuscleDemo.java`
 
-- `leftAnchor`: fixed left muscle attachment point
-- `rightAnchor`: fixed right muscle attachment point
-- `box`: rigid body being moved
-- `marker`: point attached to the box and used for tracking
-- `target`: randomized goal point
-- `leftMuscle`, `rightMuscle`: opposing axial muscles
-- `leftExciter`, `rightExciter`: muscle excitation inputs
-- REST server on `http://localhost:8081`
+Main ArtiSynth model. It builds the simple physical system:
 
-`SimpleRlController.java` stores the latest Python action vector and applies it
-during the ArtiSynth simulation step. Internally, it is now written as a
-generic action-to-exciter loop, so the same pattern can be extended from two
-toy muscles to more muscle exciters later:
+- anchors
+- dynamic box
+- tracked frame marker
+- target point
+- left/right muscles
+- left/right `MuscleExciter`s
 
-```java
-for (int i = 0; i < exciters.length; i++) {
-   exciters[i].setExcitation(actions[i]);
-}
-```
+It also defines the current simple reset behavior:
 
-The muscle material is configured to avoid passive spring forces dominating the
-task:
+- clear commanded excitations
+- clear exciter and muscle excitations
+- reset the box pose and velocity
+- sample a new target x-position
 
-```java
-new SimpleAxialMuscle(/*stiffness=*/0, /*damping=*/2, /*maxf=*/20)
-```
+### `RlRestApi.java`
 
-This makes the task depend mainly on externally supplied muscle excitation.
+REST API layer used by the Python environment.
 
-## REST API
-
-The ArtiSynth model exposes these endpoints:
+Main endpoints:
 
 ```text
-GET  /                 server status
-GET  /actionSize        number of action values
-GET  /obsSize           observation size
-GET  /stateSize         state size including reward-like value
-GET  /time              ArtiSynth simulation time
-GET  /state             current model state
-GET  /excitations       current action vector
-POST /excitations       set action vector
-POST /reset             reset box/action and randomize target
-POST /setSeed           set Java target randomization seed
-POST /setTest           store test/evaluation mode flag
+GET  /
+GET  /actionSize
+GET  /obsSize
+GET  /stateSize
+GET  /state
+GET  /time
+GET  /excitations
+POST /excitations
+POST /reset
+POST /setSeed
+POST /setTest
 ```
 
-Expected sizes for the current model:
+Python uses these endpoints to reset the episode, send muscle excitation
+actions, and read simulation state.
+
+### `RlController.java`
+
+Small interface between `RlRestApi` and a controller implementation.
+
+### `MuscleExcitationRlController.java`
+
+Reusable muscle-excitation controller. It stores the latest action vector from
+Python and applies it to the registered `MuscleExciter[]` during the ArtiSynth
+simulation step.
+
+In the current model:
 
 ```text
-actionSize = 2
-obsSize    = 18
-stateSize  = 19
-```
-<img width="2048" height="406" alt="image" src="https://github.com/user-attachments/assets/585fdfb0-e975-4b75-821e-c1c160647399" />
-
-
-Example state fields:
-
-```json
-{
-  "time": 12.34,
-  "observation": {
-    "marker": {
-      "position": [0.0, 0.0, 0.0],
-      "velocity": [0.0, 0.0, 0.0]
-    },
-    "target": {
-      "position": [-0.112647, 0.0, 0.0],
-      "velocity": [0.0, 0.0, 0.0]
-    }
-  },
-  "excitations": [0.0, 0.0],
-  "muscleForces": [0.0, 0.0],
-  "properties": [],
-  "markerPosition": [0.0, 0.0, 0.0],
-  "markerVelocity": [0.0, 0.0, 0.0],
-  "targetPosition": [-0.112647, 0.0, 0.0],
-  "trackingError": 0.112647,
-  "actionExcitations": [0.0, 0.0],
-  "exciterExcitations": [0.0, 0.0],
-  "muscleExcitations": [0.0, 0.0],
-  "muscleForces": [0.0, 0.0],
-  "rewardLike": -0.012689
-}
+action = [left excitation, right excitation]
 ```
 
-The nested `observation` / `excitations` / `muscleForces` fields are included
-to make the response closer to Amir's REST state format. The flat fields are
-kept for readability and backward compatibility with the early prototype
-scripts.
+The array-based structure is intended to make later extension to more muscle
+exciters easier.
 
-## Python Side
+### `AntagonistMuscleRlController.java`
 
-`python/tmj_practice_env.py` implements a Gymnasium-style environment:
+Small wrapper around `MuscleExcitationRlController` for the current two-muscle
+demo. It exposes left/right action values in the ArtiSynth control panel.
 
-```python
-observation, info = env.reset()
-observation, reward, terminated, truncated, info = env.step(action)
+### Compatibility Wrappers
+
+`MuscleExcitationPrototype.java` and `SimpleRlController.java` are kept for
+compatibility with the original prototype names and older launch settings.
+
+The current main model implementation is:
+
+```text
+artisynth.models.tmj.practice.AntagonistMuscleDemo
 ```
 
-It can optionally launch ArtiSynth if the REST server is not already alive by
-passing `launch_command`.
+## Python Components
 
-`python/reward.py` contains the reward configuration and reward function. This
-keeps the reward separate from the REST/environment wrapper so it can later be
-replaced with a TMJ-specific reward.
+### `artisynth_base_env.py`
 
-`python/run_env_smoke_test.py` uses a simple hand-coded policy:
+Generic REST/Gym-style base environment.
 
-- if the target is left of the marker, activate the left muscle
-- if the target is right of the marker, activate the right muscle
+It handles:
 
-`python/train_baseline.py` trains a Stable-Baselines3 SAC baseline. By default
-it exposes normalized `[-1, 1]` actions to the RL policy and maps them
-internally to ArtiSynth excitation values in `[0, 1]`.
+- `reset()`
+- `step(action)`
+- REST communication
+- action normalization
+- waiting for ArtiSynth simulation time to advance
+- reading `/state`
 
-`python/evaluate_policy.py` loads a saved SAC model and writes step-level CSV
-logs with marker position, target position, tracking error, actions, forces,
-reward, and episode flags.
+Task-specific environments subclass this base class.
+
+### `antagonist_env.py`
+
+Task-specific environment for the simple antagonist model.
+
+It defines:
+
+- parsing of the Java `/state` JSON
+- the observation vector
+- diagnostic `info` values
+- reward calculation
+- episode bookkeeping
+
+### `reward.py`
+
+Reward function for the simple point-to-point tracking task.
+
+The reward:
+
+- gives a success reward when the marker reaches the target
+- rewards progress toward the target
+- penalizes remaining distance
+- penalizes excitation effort
+- optionally penalizes velocity and abrupt action changes
+
+### `train_baseline.py`
+
+Trains a SAC policy using Stable-Baselines3.
+
+SAC is used because the action space is continuous: the policy outputs muscle
+excitation commands.
+
+### `evaluate_policy.py`
+
+Evaluates a saved SAC policy and writes a step-level CSV log.
+
+It reports:
+
+- success rate
+- truncated episodes
+- mean return
+- mean final error
+- median final error
+- mean minimum error
+- positive-target success rate
+- negative-target success rate
+
+### `run_env_smoke_test.py`
+
+Runs a hand-coded controller before training. This checks that:
+
+- Python can send actions
+- Java receives them
+- `MuscleExciter` values change
+- muscle forces appear
+- the marker moves toward the target
+- the episode terminates when the target is reached
+
+## RL Loop
+
+The current closed-loop flow is:
+
+```text
+Python policy/environment
+→ POST /excitations
+→ Java REST API
+→ ArtiSynth controller stores latest action
+→ controller applies action to MuscleExciters during simulation
+→ ArtiSynth model advances
+→ Python waits for simulation time to advance
+→ GET /state
+→ Python computes reward and the next action
+```
+
+## Action Space
+
+The Java model expects excitation values in:
+
+```text
+[0, 1]
+```
+
+For SAC training, the Python policy uses normalized actions in:
+
+```text
+[-1, 1]
+```
+
+These are mapped internally to ArtiSynth excitation values:
+
+```text
+excitation = 0.5 * (action + 1.0)
+```
+
+Current action size:
+
+```text
+2
+```
+
+corresponding to:
+
+```text
+[left muscle excitation, right muscle excitation]
+```
 
 ## Observation
 
-The current observation vector contains:
+Current observation size:
 
 ```text
-marker position xyz        3
-marker velocity xyz        3
-target position xyz        3
-tracking error             1
-left/right action          2
-left/right exciter value   2
-left/right muscle value    2
-left/right muscle force    2
------------------------------
-total                     18
+18
 ```
 
-## Reward Function
+The observation includes:
 
-The actual training reward is computed in Python in `python/reward.py`.
+- marker position
+- marker velocity
+- target position
+- tracking error
+- commanded action excitations
+- actual exciter excitations
+- muscle excitations
+- muscle forces
 
-Current reward:
+## Reset
 
-```python
-progress = previous_distance - current_distance
-effort = left_action**2 + right_action**2
-velocity = norm(marker_velocity)
-action_change = norm(current_action - previous_action)**2
-
-reward = (
-    progress_reward_scale * progress
-    - distance_penalty_scale * current_distance
-    - effort_penalty_scale * effort
-    - velocity_penalty_scale * velocity
-    - action_change_penalty_scale * action_change
-)
-```
-
-If the marker reaches the target:
-
-```python
-if current_distance <= goal_threshold:
-    reward = goal_reward
-    terminated = True
-```
-
-Current default weights:
+Python initiates reset through:
 
 ```text
-progress_reward_scale = 20.0
-distance_penalty_scale = 1.0
-effort_penalty_scale = 0.01
-velocity_penalty_scale = 0.02
-action_change_penalty_scale = 0.005
-goal_threshold = 0.01
-goal_reward = 5.0
+POST /reset
 ```
 
-Meaning:
+The Java model then:
 
-- reward increases when the marker moves closer to the target
-- reward decreases when the marker remains far from the target
-- large muscle excitation is mildly penalized
-- high marker velocity and abrupt action changes can be mildly penalized
-- reaching the target gives a terminal reward
+- clears commanded excitations
+- clears exciter and muscle excitations
+- resets the box pose and velocity
+- samples a new target x-position
 
-## How To Run
+This reset is sufficient for the current simple prototype, but more robust
+reset handling and timestep synchronization should be checked before scaling to
+a more complex jaw/TMJ model.
 
-Start the Java model from Eclipse/ArtiSynth:
+## Running the Demo
+
+### 1. Start ArtiSynth
+
+Load this model in ArtiSynth/Eclipse:
+
+```text
+artisynth.models.tmj.practice.AntagonistMuscleDemo
+```
+
+The old compatibility entry point also works:
 
 ```text
 artisynth.models.tmj.practice.MuscleExcitationPrototype
 ```
 
-Confirm the REST server:
+Press play in ArtiSynth so simulation time advances.
+
+### 2. Check REST
 
 ```bash
 curl http://localhost:8081/actionSize
 curl http://localhost:8081/obsSize
 curl http://localhost:8081/stateSize
-curl -X POST http://localhost:8081/reset
+curl http://localhost:8081/state
 ```
 
-Expected output:
+Expected sizes:
 
 ```text
-2
-18
-19
+actionSize = 2
+obsSize = 18
+stateSize = 19
 ```
 
-Run the smoke test:
+### 3. Install Python dependencies
 
 ```bash
-python python/run_env_smoke_test.py
+cd python
+pip install -r requirements.txt
 ```
 
-Run SAC training:
+### 4. Run a smoke test
 
 ```bash
-python python/train_baseline.py --timesteps 20000 --skip-check-env
+python run_env_smoke_test.py
 ```
 
-The trained model is saved under `runs/`, which is ignored by git.
-
-Evaluate a saved policy and write a CSV log:
+### 5. Train SAC
 
 ```bash
-python python/evaluate_policy.py \
-  --model-path runs/sac_tmj_practice.zip \
-  --episodes 20 \
-  --output runs/evaluation.csv
+python train_baseline.py --timesteps 50000 --skip-check-env
 ```
 
-Optional auto-launch pattern:
+This saves the model to:
+
+```text
+runs/sac_tmj_practice.zip
+```
+
+Model `.zip` files are ignored by git.
+
+### 6. Evaluate
 
 ```bash
-python python/train_baseline.py \
-  --launch-command "artisynth -model artisynth.models.tmj.practice.MuscleExcitationPrototype -play" \
-  --timesteps 20000 \
-  --skip-check-env
-```
-<img width="800" height="500" alt="Screen Recording 2026-05-04 at 3 39 41 PM" src="https://github.com/user-attachments/assets/324c0544-d3c8-4299-aaae-0dd8f29dfb64" />
-
-## Current Results
-
-The current smoke test succeeds. Example from the simple hand-coded controller:
-
-```text
-target x = 0.1422
-marker x = 0.0000 -> 0.0230 -> 0.0738 -> 0.1543 -> 0.2033 -> 0.2276 -> 0.2249 -> 0.2007 -> 0.1350
-error    = 0.1422 -> 0.1191 -> 0.0684 -> 0.0122 -> 0.0612 -> 0.0854 -> 0.0828 -> 0.0585 -> 0.0072
-result   = terminated=True
+python evaluate_policy.py --episodes 50 --output runs/evaluation_sac_50.csv
 ```
 
-This verifies that:
-
-- Python reads the target state
-- Python sends a left/right excitation action
-- Java applies the action through `MuscleExciter`s
-- ArtiSynth moves the marker through the muscle model
-- Python receives the updated state and termination condition
-
-The hand-coded smoke-test controller can overshoot the target, but it still
-confirms that the REST, controller, excitation, force, state, and termination
-loop is working.
-
-The current SAC baseline learns a strong policy for this simple antagonist
-tracking task. Latest SAC training command:
+### 7. Plot
 
 ```bash
-python python/train_baseline.py --timesteps 20000 --skip-check-env
+python plot_evaluation.py \
+  --input runs/evaluation_sac_50.csv \
+  --output runs/tracking_error_sac_50.png
 ```
 
-Training output summary:
+The representative 50-episode evaluation files are included in `results/`.
 
-```text
-Saved model to runs/sac_tmj_practice.zip
-Evaluation mean reward: 7.243 +/- 0.647
-```
+## Current Limitations
 
-Post-training sample episode:
+- The physical model is intentionally simple.
+- The task is point-to-point marker tracking, not full TMJ/jaw control.
+- Reset is still manually implemented for the simple model.
+- ArtiSynth timestep synchronization should be checked more carefully.
+- OutputProbe visualization can be improved, especially for multiple muscle
+  activations/forces in one plot.
+- The reward is a simple tracking reward, not a final TMJ cost function.
 
-```text
-target x = 0.1862
-marker x = 0.0000 -> 0.0392 -> 0.1095 -> 0.1525 -> 0.1739 -> 0.1873
-error    = 0.1861 -> 0.1470 -> 0.0767 -> 0.0336 -> 0.0123 -> 0.0011
-result   = terminated=True
-```
+## Next Steps
 
-Twenty-episode SAC evaluation:
+Planned next steps:
 
-```text
-Episodes: 20
-Successes: 20/20
-Success rate: 100.0%
-Truncated episodes: 0/20
-Mean return: 6.7767
-Mean final error: 0.0038
-Median final error: 0.0027
-Mean min error: 0.0038
-Positive target success rate: 100.0% (9 episodes)
-Negative target success rate: 100.0% (11 episodes)
-```
-<img width="1530" height="752" alt="image" src="https://github.com/user-attachments/assets/7246db4b-d0a7-487b-8437-4f96e10d9515" />
-
-So the current status is:
-
-```text
-ArtiSynth/Python RL pipeline: working
-heuristic control: working
-SAC baseline: strong on the simple antagonist model
-Amir-like state/action REST shape: partially implemented
-generic action-to-exciter controller loop: implemented
-full TMJ/jaw RL transfer: not yet
-```
-
+- add reset consistency tests
+- improve OutputProbe visualization
+- check the best ArtiSynth timestep/advance hook with John
+- make the state interface more component-based
+- extend the same REST/controller structure toward a jaw/TMJ model
+- design a task-specific jaw reward/cost function

@@ -12,11 +12,13 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
 
-from tmj_practice_env import TmjPracticeEnv
+from antagonist_env import AntagonistMuscleEnv
 
 
 def make_env(args):
-    env = TmjPracticeEnv(
+    """Create the REST-backed ArtiSynth environment."""
+
+    env = AntagonistMuscleEnv(
         base_url=args.base_url,
         wait_action=args.wait_action,
         reset_wait=args.reset_wait,
@@ -33,12 +35,13 @@ def make_env(args):
         launch_command=args.launch_command,
         launch_timeout=args.launch_timeout,
     )
+
     return Monitor(env)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train a SAC baseline on the simple TMJ practice env."
+        description="Train a SAC baseline on the antagonist muscle demo."
     )
     parser.add_argument("--algo", choices=["sac"], default="sac", help=argparse.SUPPRESS)
     parser.add_argument("--base-url", default="http://localhost:8081")
@@ -94,6 +97,7 @@ def main():
         check_env(env.unwrapped, warn=True)
 
     print("Training SAC baseline...")
+
     model = SAC(
         "MlpPolicy",
         env,
@@ -108,6 +112,7 @@ def main():
         gradient_steps=1,
         device="cpu",
     )
+
     model.learn(total_timesteps=args.timesteps)
 
     model.save(args.save_path)

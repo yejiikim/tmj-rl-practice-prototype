@@ -1,9 +1,16 @@
 import numpy as np
 
-from tmj_practice_env import TmjPracticeEnv
+from antagonist_env import AntagonistMuscleEnv
 
 
 def heuristic_action(info, gain=4.0):
+    """Simple hand-coded controller used before RL training.
+
+    If the target is left of the marker, activate the left muscle. If the target
+    is right of the marker, activate the right muscle. This is only a sanity
+    check that REST actions actually move the ArtiSynth model.
+    """
+
     marker_x = info["markerPosition"][0]
     target_x = info["targetPosition"][0]
     direction_error = target_x - marker_x
@@ -15,7 +22,7 @@ def heuristic_action(info, gain=4.0):
 
 
 def main():
-    env = TmjPracticeEnv(wait_action=0.05, max_episode_steps=40)
+    env = AntagonistMuscleEnv(wait_action=0.05, max_episode_steps=40)
 
     observation, info = env.reset()
     print("Reset")
