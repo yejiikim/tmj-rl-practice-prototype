@@ -445,7 +445,7 @@ Planned next steps:
 
 - add reset consistency tests
 - improve OutputProbe visualization
-- check the best ArtiSynth timestep/advance hook with John
+- check the best ArtiSynth timestep/advance hook 
 - make the state interface more component-based
 - extend the same REST/controller structure toward a jaw/TMJ model
 - design a task-specific jaw reward/cost function
