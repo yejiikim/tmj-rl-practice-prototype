@@ -88,6 +88,12 @@ tracking.
 
 ## Repository Structure
 
+The repository is split into Java, Python, and result files:
+
+- `java/` contains the ArtiSynth model, REST API, and controller code.
+- `python/` contains the REST-backed environment, reward, training, and evaluation scripts.
+- `results/` contains the representative 50-episode SAC evaluation output.
+
 ```text
 java/
   src/artisynth/models/tmj/practice/
