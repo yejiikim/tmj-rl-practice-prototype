@@ -66,6 +66,9 @@ The ArtiSynth model consists of:
 
 The structure is:
 
+<img width="294" height="104" alt="image" src="https://github.com/user-attachments/assets/a5d03215-a796-4171-a31d-803770486478" />
+
+
 ```text
 left anchor -- left muscle -- marker/box -- right muscle -- right anchor
                                 |
