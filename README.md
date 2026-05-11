@@ -202,6 +202,9 @@ artisynth.models.tmj.practice.AntagonistMuscleDemo
 
 ## Python Components
 
+The Python side is organized around the standard RL concepts: environment,
+action, observation, reward, training, and evaluation.
+
 ### `artisynth_base_env.py`
 
 Generic REST/Gym-style base environment.
@@ -214,6 +217,10 @@ It handles:
 - action normalization
 - waiting for ArtiSynth simulation time to advance
 - reading `/state`
+
+In one environment step, Python sends an excitation action to Java, waits for
+the ArtiSynth simulation time to advance, reads the new state, and returns the
+observation/reward/termination values expected by Stable-Baselines3.
 
 Task-specific environments subclass this base class.
 
@@ -241,12 +248,18 @@ The reward:
 - penalizes excitation effort
 - optionally penalizes velocity and abrupt action changes
 
+The reward is computed in Python. The Java `rewardLike` value is only a
+diagnostic value for quick state inspection.
+
 ### `train_baseline.py`
 
 Trains a SAC policy using Stable-Baselines3.
 
 SAC is used because the action space is continuous: the policy outputs muscle
 excitation commands.
+
+For the representative result in this repository, SAC was trained for 50000
+timesteps.
 
 ### `evaluate_policy.py`
 
@@ -321,6 +334,56 @@ corresponding to:
 ```text
 [left muscle excitation, right muscle excitation]
 ```
+
+## Reward Function
+
+The current reward is a simple tracking reward for the prototype. It is not
+intended as the final TMJ/jaw objective.
+
+The success condition is:
+
+```text
+tracking error <= 0.01
+```
+
+If the marker reaches this threshold, the episode terminates and receives:
+
+```text
+goal_reward = 5.0
+```
+
+Otherwise, the step reward is:
+
+```text
+reward =
+  progress_reward_scale * progress
+  - distance_penalty_scale * distance
+  - effort_penalty_scale * effort
+  - velocity_penalty_scale * velocity_norm
+  - action_change_penalty_scale * action_change
+```
+
+where:
+
+```text
+progress = previous_distance - current_distance
+effort = sum(action^2)
+action_change = sum((action - previous_action)^2)
+```
+
+The training run reported here used:
+
+```text
+progress_reward_scale = 20.0
+distance_penalty_scale = 1.0
+effort_penalty_scale = 0.01
+velocity_penalty_scale = 0.02
+action_change_penalty_scale = 0.005
+```
+
+The progress term rewards movement toward the target. The distance term
+penalizes remaining error. The effort term discourages unnecessarily large
+muscle excitation commands.
 
 ## Observation
 
