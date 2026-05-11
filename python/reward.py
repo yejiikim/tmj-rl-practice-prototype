@@ -8,8 +8,7 @@ import numpy as np
 class TrackingRewardConfig:
     """Weights for the simple marker-to-target reaching reward.
 
-    These values are hand-tuned for the prototype. They are not meant to be a
-    final TMJ objective.
+    These values are hand-tuned for the prototype.
     """
 
     goal_threshold: float = 0.01
