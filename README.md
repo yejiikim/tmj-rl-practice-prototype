@@ -419,6 +419,9 @@ runs/sac_tmj_practice.zip
 
 Model `.zip` files are ignored by git.
 
+<img width="3022" height="1726" alt="Screen Recording 2026-05-11 at 2 41 16 PM" src="https://github.com/user-attachments/assets/4f8c734c-806f-4275-b9ab-f04601af9357" />
+
+
 ### 6. Evaluate
 
 ```bash
